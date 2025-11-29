@@ -354,7 +354,7 @@ export class ExamListComponent implements OnInit, OnDestroy {
       setTimeout(() => this.checkCompleteness(), 500);
       
       // Load students for the selected class, sorted by LastName
-      this.studentService.getStudents(this.selectedClassId).subscribe({
+      this.studentService.getStudents({ classId: this.selectedClassId }).subscribe({
         next: (data: any) => {
           console.log('Received students from API:', data);
           console.log('Number of students received:', data?.length || 0);

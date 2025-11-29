@@ -8,6 +8,7 @@ import { Teacher } from '../entities/Teacher';
 import { Parent } from '../entities/Parent';
 import { resetDemoDataForLogin } from '../utils/resetDemoData';
 import { ensureDemoDataAvailable } from '../utils/demoDataEnsurer';
+import { AuthRequest } from '../middleware/auth';
 
 export const login = async (req: Request, res: Response) => {
   try {
@@ -278,7 +279,7 @@ export const login = async (req: Request, res: Response) => {
     if (!secret) {
       return res.status(500).json({ message: 'Server configuration error' });
     }
-    const expiresIn = process.env.JWT_EXPIRES_IN || '7d';
+    const expiresIn = process.env.JWT_EXPIRES_IN || '30m';
     // @ts-ignore - expiresIn accepts string values like '7d' which is valid
     const token = jwt.sign(
       { userId: user.id, role: user.role },
@@ -490,5 +491,19 @@ export const confirmPasswordReset = async (req: Request, res: Response) => {
   } catch (error: any) {
     console.error('Password reset confirmation error:', error);
     res.status(500).json({ message: 'Server error', error: error.message });
+  }
+};
+
+export const logout = async (req: AuthRequest, res: Response) => {
+  try {
+    // For JWT-based auth we simply instruct the client to discard the token.
+    // This endpoint exists to maintain parity with session-based flows.
+    res.json({
+      message: 'Logged out successfully',
+      timestamp: new Date().toISOString()
+    });
+  } catch (error: any) {
+    console.error('Logout error:', error);
+    res.status(500).json({ message: 'Failed to logout', error: error.message });
   }
 };

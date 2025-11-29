@@ -34,7 +34,7 @@
         class="search-input" 
         placeholder="Search classes by name, grade, or description..."
         [(ngModel)]="searchTerm"
-        (input)="filterClasses()">
+        (input)="onSearchInput()">
       <button class="search-clear" *ngIf="searchTerm" (click)="clearSearch()" aria-label="Clear search">×</button>
     </div>
     <div class="filter-controls">
@@ -123,22 +123,24 @@
           </td>
           <td class="actions-cell">
             <div class="action-buttons">
-              <button 
-                class="btn-action btn-edit" 
-                (click)="editClass(classItem.id)" 
-                title="Edit Class">
-                <span class="action-icon">✏️</span>
-                <span class="action-text">Edit</span>
-              </button>
               <span class="actions-label">Actions</span>
-              <button 
-                class="btn-action btn-delete" 
-                (click)="deleteClass(classItem.id, classItem.name)" 
-                [disabled]="loading"
-                title="Delete Class">
-                <span class="action-icon">🗑️</span>
-                <span class="action-text">Delete</span>
-              </button>
+              <div class="action-buttons-row">
+                <button 
+                  class="btn-action btn-edit" 
+                  (click)="editClass(classItem.id)" 
+                  title="Edit Class">
+                  <span class="action-icon">✏️</span>
+                  <span class="action-text">Edit</span>
+                </button>
+                <button 
+                  class="btn-action btn-delete" 
+                  (click)="deleteClass(classItem.id, classItem.name)" 
+                  [disabled]="loading"
+                  title="Delete Class">
+                  <span class="action-icon">🗑️</span>
+                  <span class="action-text">Delete</span>
+                </button>
+              </div>
             </div>
           </td>
         </tr>
@@ -167,8 +169,26 @@
     <!-- Results Summary -->
     <div class="results-summary" *ngIf="filteredClasses.length > 0">
       <span class="summary-text">
-        Showing {{ filteredClasses.length }} of {{ classes.length }} class{{ classes.length !== 1 ? 'es' : '' }}
+        Showing {{ filteredClasses.length }} of {{ pagination.total }} class{{ pagination.total !== 1 ? 'es' : '' }}
       </span>
+    </div>
+  </div>
+
+  <div class="pagination-bar" *ngIf="!loading && (pagination.totalPages > 1 || pagination.total > pagination.limit)">
+    <button class="btn btn-secondary" (click)="changePage(pagination.page - 1)" [disabled]="pagination.page === 1">
+      ‹ Previous
+    </button>
+    <span class="page-info">
+      Page {{ pagination.page }} of {{ pagination.totalPages }} • {{ pagination.total }} records
+    </span>
+    <button class="btn btn-secondary" (click)="changePage(pagination.page + 1)" [disabled]="pagination.page === pagination.totalPages">
+      Next ›
+    </button>
+    <div class="page-size-selector">
+      <label for="classPageSize">Rows per page:</label>
+      <select id="classPageSize" (change)="changePageSize($event.target.value)" [value]="pagination.limit">
+        <option *ngFor="let size of pageSizeOptions" [value]="size">{{ size }}</option>
+      </select>
     </div>
   </div>
 </div>

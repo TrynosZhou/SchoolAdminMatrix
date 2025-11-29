@@ -1,4 +1,4 @@
-import { Component } from '@angular/core';
+import { Component, OnInit } from '@angular/core';
 import { Router } from '@angular/router';
 import { AuthService } from '../../services/auth.service';
 
@@ -7,7 +7,7 @@ import { AuthService } from '../../services/auth.service';
   templateUrl: './login.component.html',
   styleUrls: ['./login.component.css']
 })
-export class LoginComponent {
+export class LoginComponent implements OnInit {
   // Tab management
   activeTab: 'signin' | 'signup' | 'reset' = 'signin';
   
@@ -38,6 +38,14 @@ export class LoginComponent {
   showSignupConfirmPassword = false;
 
   constructor(private authService: AuthService, private router: Router) { }
+
+  ngOnInit(): void {
+    const storedMessage = sessionStorage.getItem('sessionMessage');
+    if (storedMessage) {
+      this.error = storedMessage;
+      sessionStorage.removeItem('sessionMessage');
+    }
+  }
 
   togglePasswordVisibility() {
     this.showPassword = !this.showPassword;

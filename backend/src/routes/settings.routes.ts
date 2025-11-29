@@ -11,11 +11,13 @@ import {
   getUniformItems,
   createUniformItem,
   updateUniformItem,
-  deleteUniformItem
+  deleteUniformItem,
+  getPublicSplashSettings
 } from '../controllers/settings.controller';
 
 const router = Router();
 
+router.get('/public/splash', getPublicSplashSettings);
 router.get('/', authenticate, getSettings);
 router.put('/', authenticate, authorize(UserRole.ADMIN, UserRole.SUPERADMIN), updateSettings);
 router.get('/active-term', authenticate, getActiveTerm);

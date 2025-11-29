@@ -695,6 +695,13 @@
   color: #6c757d;
 }
 
+.report-table th.points-header,
+.report-table td.points {
+  text-align: center;
+  font-weight: 700;
+  color: #1f2937;
+}
+
 /* Grade Badges */
 .grade-badge {
   padding: 6px 12px;

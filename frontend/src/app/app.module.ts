@@ -12,6 +12,7 @@ import { StudentListComponent } from './components/students/student-list/student
 import { StudentFormComponent } from './components/students/student-form/student-form.component';
 import { TeacherListComponent } from './components/teachers/teacher-list/teacher-list.component';
 import { TeacherFormComponent } from './components/teachers/teacher-form/teacher-form.component';
+import { AssignClassesComponent } from './components/teachers/assign-classes/assign-classes.component';
 import { ExamListComponent } from './components/exams/exam-list/exam-list.component';
 import { ExamFormComponent } from './components/exams/exam-form/exam-form.component';
 import { MarksEntryComponent } from './components/exams/marks-entry/marks-entry.component';
@@ -42,6 +43,12 @@ import { TeacherRecordBookComponent } from './components/admin/teacher-record-bo
 import { TeacherDashboardComponent } from './components/teacher/teacher-dashboard/teacher-dashboard.component';
 import { RecordPaymentComponent } from './components/finance/record-payment/record-payment.component';
 import { OutstandingBalanceComponent } from './components/finance/outstanding-balance/outstanding-balance.component';
+import { TransferFormComponent } from './components/transfers/transfer-form/transfer-form.component';
+import { TransferHistoryComponent } from './components/transfers/transfer-history/transfer-history.component';
+import { EnrollStudentComponent } from './components/enrollments/enroll-student/enroll-student.component';
+import { UnenrolledStudentsComponent } from './components/enrollments/unenrolled-students/unenrolled-students.component';
+import { DHServicesReportComponent } from './components/reports/dh-services-report/dh-services-report.component';
+import { TransportServicesReportComponent } from './components/reports/transport-services-report/transport-services-report.component';
 import { SplashComponent } from './components/splash/splash.component';
 
 @NgModule({
@@ -53,6 +60,7 @@ import { SplashComponent } from './components/splash/splash.component';
     StudentFormComponent,
     TeacherListComponent,
     TeacherFormComponent,
+    AssignClassesComponent,
     ExamListComponent,
     ExamFormComponent,
     MarksEntryComponent,
@@ -82,6 +90,12 @@ import { SplashComponent } from './components/splash/splash.component';
     TeacherDashboardComponent,
     RecordPaymentComponent,
     OutstandingBalanceComponent,
+    TransferFormComponent,
+    TransferHistoryComponent,
+    EnrollStudentComponent,
+    UnenrolledStudentsComponent,
+    DHServicesReportComponent,
+    TransportServicesReportComponent,
     SplashComponent
   ],
   imports: [

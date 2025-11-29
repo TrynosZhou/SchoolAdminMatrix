@@ -19,6 +19,9 @@ export class TeacherRecordBookComponent implements OnInit {
   teacherClasses: any[] = [];
   selectedClassId: string = '';
   selectedClass: any = null;
+  availableSubjects: any[] = [];
+  selectedSubjectId: string = '';
+  selectedSubject: any = null;
   students: any[] = [];
   filteredStudents: any[] = [];
   loading = false;
@@ -135,8 +138,11 @@ export class TeacherRecordBookComponent implements OnInit {
   selectTeacher(teacher: any) {
     this.selectedTeacher = teacher;
     this.teacherClasses = teacher.classes || [];
+    this.availableSubjects = teacher.subjects || [];
     this.selectedClassId = '';
     this.selectedClass = null;
+    this.selectedSubjectId = '';
+    this.selectedSubject = null;
     this.students = [];
     this.filteredStudents = [];
     this.error = '';
@@ -147,8 +153,11 @@ export class TeacherRecordBookComponent implements OnInit {
     this.filteredTeachers = [...this.teachers];
     this.selectedTeacher = null;
     this.teacherClasses = [];
+    this.availableSubjects = [];
     this.selectedClassId = '';
     this.selectedClass = null;
+    this.selectedSubjectId = '';
+    this.selectedSubject = null;
     this.students = [];
     this.filteredStudents = [];
   }
@@ -156,18 +165,39 @@ export class TeacherRecordBookComponent implements OnInit {
   onClassClick(classItem: any) {
     this.selectedClassId = classItem.id;
     this.selectedClass = classItem;
-    this.loadRecordBook(classItem.id);
+    // Don't auto-load - wait for subject selection
+    if (this.selectedSubjectId) {
+      this.loadRecordBook(classItem.id);
+    }
+  }
+
+  onSubjectChange() {
+    if (this.selectedSubjectId) {
+      this.selectedSubject = this.availableSubjects.find(s => s.id === this.selectedSubjectId) || null;
+      if (this.selectedClassId) {
+        this.loadRecordBook(this.selectedClassId);
+      }
+    } else {
+      this.selectedSubject = null;
+      this.students = [];
+      this.filteredStudents = [];
+    }
   }
 
   loadRecordBook(classId: string) {
-    if (!classId || !this.selectedTeacher) return;
+    if (!classId || !this.selectedTeacher || !this.selectedSubjectId) {
+      if (!this.selectedSubjectId) {
+        this.error = 'Please select a subject first';
+      }
+      return;
+    }
 
     this.loading = true;
     this.error = '';
     
     // Use admin endpoint to get record book for any teacher's class
     const apiUrl = environment.apiUrl;
-    this.http.get(`${apiUrl}/record-book/admin/class/${classId}?teacherId=${this.selectedTeacher.id}`).subscribe({
+    this.http.get(`${apiUrl}/record-book/admin/class/${classId}?teacherId=${this.selectedTeacher.id}&subjectId=${this.selectedSubjectId}`).subscribe({
       next: (response: any) => {
         this.students = response.students || [];
         this.currentTerm = response.term || this.currentTerm;
@@ -389,8 +419,8 @@ export class TeacherRecordBookComponent implements OnInit {
   }
 
   downloadPDF() {
-    if (!this.selectedClassId || !this.selectedTeacher) {
-      this.error = 'Please select a teacher and class first';
+    if (!this.selectedClassId || !this.selectedTeacher || !this.selectedSubjectId) {
+      this.error = 'Please select a teacher, class, and subject first';
       return;
     }
 
@@ -398,7 +428,7 @@ export class TeacherRecordBookComponent implements OnInit {
     this.error = '';
     const apiUrl = environment.apiUrl;
     
-    this.http.get(`${apiUrl}/record-book/admin/pdf/${this.selectedClassId}?teacherId=${this.selectedTeacher.id}`, {
+    this.http.get(`${apiUrl}/record-book/admin/pdf/${this.selectedClassId}?teacherId=${this.selectedTeacher.id}&subjectId=${this.selectedSubjectId}`, {
       responseType: 'blob'
     }).subscribe({
       next: (blob: Blob) => {

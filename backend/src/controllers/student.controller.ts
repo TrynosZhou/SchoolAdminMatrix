@@ -3,6 +3,7 @@ import { AppDataSource } from '../config/database';
 import { Student } from '../entities/Student';
 import { User, UserRole } from '../entities/User';
 import { Class } from '../entities/Class';
+import { StudentEnrollment } from '../entities/StudentEnrollment';
 import { Marks } from '../entities/Marks';
 import { Invoice, InvoiceStatus } from '../entities/Invoice';
 import { ReportCardRemarks } from '../entities/ReportCardRemarks';
@@ -15,6 +16,8 @@ import { createStudentIdCardPDF } from '../utils/studentIdCardPdf';
 import { isDemoUser } from '../utils/demoDataFilter';
 import { parseAmount } from '../utils/numberUtils';
 import { calculateAge } from '../utils/ageUtils';
+import { In } from 'typeorm';
+import { buildPaginationResponse, parsePaginationParams } from '../utils/pagination';
 
 export const registerStudent = async (req: AuthRequest, res: Response) => {
   try {
@@ -58,19 +61,18 @@ export const registerStudent = async (req: AuthRequest, res: Response) => {
       return res.status(400).json({ message: 'Contact number is required' });
     }
 
-    if (!classId) {
-      return res.status(400).json({ message: 'Class ID is required for student enrollment' });
-    }
-
     const studentRepository = AppDataSource.getRepository(Student);
     const classRepository = AppDataSource.getRepository(Class);
     const settingsRepository = AppDataSource.getRepository(Settings);
     const invoiceRepository = AppDataSource.getRepository(Invoice);
 
-    // Verify class exists
-    const classEntity = await classRepository.findOne({ where: { id: classId } });
-    if (!classEntity) {
-      return res.status(404).json({ message: 'Class not found' });
+    // Verify class exists if provided (optional for registration)
+    let classEntity = null;
+    if (classId) {
+      classEntity = await classRepository.findOne({ where: { id: classId } });
+      if (!classEntity) {
+        return res.status(404).json({ message: 'Class not found' });
+      }
     }
 
     if (parentId) {
@@ -95,8 +97,8 @@ export const registerStudent = async (req: AuthRequest, res: Response) => {
     }
 
     const studentAge = calculateAge(parsedDateOfBirth);
-    if (studentAge < 4 || studentAge > 12) {
-      return res.status(400).json({ message: 'Student age must be between 4 and 12 years' });
+    if (studentAge < 11 || studentAge > 20) {
+      return res.status(400).json({ message: 'Student age must be between 11 and 20 years' });
     }
 
     // Use contactNumber if provided, otherwise fall back to phoneNumber
@@ -116,7 +118,7 @@ export const registerStudent = async (req: AuthRequest, res: Response) => {
     const usesDiningHallFlag = parseBoolean(usesDiningHall);
     const isStaffChildFlag = parseBoolean(isStaffChild);
 
-    // Create student with auto-generated ID and auto-enrollment
+    // Create student - classId is optional (can be enrolled later)
     const student = studentRepository.create({
       firstName: firstName.trim(),
       lastName: lastName.trim(),
@@ -131,9 +133,9 @@ export const registerStudent = async (req: AuthRequest, res: Response) => {
       usesDiningHall: usesDiningHallFlag,
       isStaffChild: isStaffChildFlag,
       photo: photoPath,
-      classId, // Auto-enroll into the specified class
+      classId: classId || null, // Optional - can be enrolled later
       parentId: parentId || null,
-      enrollmentDate: new Date()
+      enrollmentStatus: classId ? 'Enrolled' : 'Not Enrolled' // Set status based on enrollment
     });
 
     await studentRepository.save(student);
@@ -144,8 +146,11 @@ export const registerStudent = async (req: AuthRequest, res: Response) => {
       relations: ['classEntity', 'parent']
     });
 
-    // Automatically create an initial invoice for the new student
-    try {
+    // Only create invoice if student was enrolled during registration
+    // Unenrolled students will get invoices when they are enrolled
+    if (classId) {
+      // Automatically create an initial invoice for the newly enrolled student
+      try {
       console.log('📋 Creating invoice for new student:', savedStudent?.studentNumber || student.studentNumber);
       console.log('📋 Student ID:', savedStudent?.id || student.id);
       const settings = await settingsRepository.findOne({
@@ -308,14 +313,19 @@ export const registerStudent = async (req: AuthRequest, res: Response) => {
           console.warn(`   - ${validStudentType === 'Boarder' ? 'Boarder' : 'Day Scholar'} Tuition Fee`);
         }
       }
-    } catch (invoiceError) {
-      console.error('❌ Error creating initial invoice for new student:', invoiceError);
-      console.error('❌ Error details:', invoiceError);
-      // Continue without failing the student registration
+      } catch (invoiceError) {
+        console.error('❌ Error creating initial invoice for new student:', invoiceError);
+        console.error('❌ Error details:', invoiceError);
+        // Continue without failing the student registration
+      }
     }
 
+    const message = classId 
+      ? 'Student registered and enrolled successfully' 
+      : 'Student registered successfully. Please enroll them into a class.';
+    
     res.status(201).json({ 
-      message: 'Student registered and enrolled successfully', 
+      message,
       student: savedStudent 
     });
   } catch (error: any) {
@@ -340,119 +350,87 @@ export const registerStudent = async (req: AuthRequest, res: Response) => {
 
 export const getStudents = async (req: AuthRequest, res: Response) => {
   try {
-    // Ensure database is initialized
     if (!AppDataSource.isInitialized) {
       await AppDataSource.initialize();
     }
 
     const studentRepository = AppDataSource.getRepository(Student);
-    const { classId } = req.query;
+    const { classId, enrollmentStatus } = req.query;
+    const searchQuery = typeof req.query.search === 'string' ? req.query.search.trim().toLowerCase() : '';
+    const genderFilter = typeof req.query.gender === 'string' ? req.query.gender.trim().toLowerCase() : '';
+    const studentTypeFilter = typeof req.query.studentType === 'string' ? req.query.studentType.trim().toLowerCase() : '';
+    const pagination = parsePaginationParams(req.query);
 
-    console.log('Fetching students with classId:', classId);
-
-    let students: Student[] = [];
+    const queryBuilder = studentRepository
+      .createQueryBuilder('student')
+      .leftJoinAndSelect('student.parent', 'parent')
+      .leftJoinAndSelect('student.user', 'user')
+      .leftJoinAndSelect('student.enrollments', 'enrollments')
+      .leftJoinAndSelect('student.classEntity', 'classEntity')
+      .orderBy('student.firstName', 'ASC')
+      .addOrderBy('student.lastName', 'ASC')
+      .distinct(true);
 
     if (classId) {
-      // Ensure classId is trimmed and valid
       const trimmedClassId = String(classId).trim();
-      console.log('Filtering students by classId:', trimmedClassId);
-
-      // Query all students for the class (demo users have full access)
-      const queryBuilder = studentRepository
-        .createQueryBuilder('student')
-        .leftJoinAndSelect('student.classEntity', 'classEntity')
-        .leftJoinAndSelect('student.parent', 'parent')
-        .leftJoinAndSelect('student.user', 'user')
-        .where('student.classId = :classId', { classId: trimmedClassId });
-      
-      students = await queryBuilder.getMany();
-      console.log(`Found ${students.length} students using query builder for classId: ${trimmedClassId}`);
-
-      // If still no students found, try a more permissive approach
-      if (students.length === 0) {
-        console.log('No students found with query builder, trying alternative methods...');
-        
-        // Try finding by class name if we can get the class
-        const classRepository = AppDataSource.getRepository(Class);
-        const classEntity = await classRepository.findOne({ where: { id: trimmedClassId } });
-        
-        if (classEntity) {
-          console.log(`Found class: ${classEntity.name} (${classEntity.id})`);
-          
-          // Try query by class name as fallback
-          const studentsByClassName = await studentRepository
-            .createQueryBuilder('student')
-            .leftJoinAndSelect('student.classEntity', 'classEntity')
-            .leftJoinAndSelect('student.parent', 'parent')
-            .leftJoinAndSelect('student.user', 'user')
-            .where('class.name = :className', { className: classEntity.name })
-            .getMany();
-          
-          console.log(`Found ${studentsByClassName.length} students by class name: ${classEntity.name}`);
-          
-          if (studentsByClassName.length > 0) {
-            students = studentsByClassName;
-            // Update their classId to match
-            console.log('Updating students classId to match...');
-            for (const student of students) {
-              if (student.classId !== trimmedClassId) {
-                student.classId = trimmedClassId;
-                await studentRepository.save(student);
-                console.log(`Updated student ${student.firstName} ${student.lastName} classId to ${trimmedClassId}`);
-              }
-            }
-          }
-        }
-      }
-
-      // Final fallback: get all students and filter in memory
-      if (students.length === 0) {
-        console.log('Trying final fallback: loading all students...');
-        const allStudents = await studentRepository.find({
-          relations: ['classEntity', 'parent', 'user']
-        });
-        
-        // Filter by classId or class.id
-        students = allStudents.filter(s => 
-          (s.classId && s.classId === trimmedClassId) || 
-          (s.classEntity && s.classEntity.id === trimmedClassId)
-        );
-        
-        console.log(`Found ${students.length} students after filtering all students`);
-        
-        // Log all students for debugging
-        console.log(`Total students in database: ${allStudents.length}`);
-        allStudents.forEach((s, idx) => {
-          console.log(`Student ${idx + 1}: ${s.firstName} ${s.lastName}, classId: ${s.classId}, classEntity.name: ${s.classEntity?.name || 'N/A'}, classEntity.id: ${s.classEntity?.id || 'N/A'}`);
-        });
-      }
-
-      if (students.length > 0) {
-        console.log('Sample student classId:', students[0].classId);
-        console.log('Sample student classEntity:', students[0].classEntity?.name);
-        console.log('Sample student classEntity.id:', students[0].classEntity?.id);
-      }
-    } else {
-      // No classId provided, return all students (demo users have full access)
-      students = await studentRepository
-        .createQueryBuilder('student')
-        .leftJoinAndSelect('student.classEntity', 'classEntity')
-        .leftJoinAndSelect('student.parent', 'parent')
-        .leftJoinAndSelect('student.user', 'user')
-        .getMany();
-      
-      console.log(`No classId provided, returning all ${students.length} students`);
+      queryBuilder.andWhere(
+        '(student.classId = :classId OR classEntity.id = :classId OR enrollments.classId = :classId)',
+        { classId: trimmedClassId }
+      );
     }
 
-    // Filter to only return active students (if isActive is false, exclude them)
-    const activeStudents = students.filter(s => s.isActive !== false);
-    console.log(`Returning ${activeStudents.length} active students`);
+    const transferredOutStatus = 'Transferred Out';
+    if (enrollmentStatus) {
+      const status = String(enrollmentStatus).trim();
+      queryBuilder.andWhere('student.enrollmentStatus = :status', { status });
+    } else {
+      queryBuilder.andWhere(
+        '(student.enrollmentStatus IS NULL OR student.enrollmentStatus != :transferredOut)',
+        { transferredOut: transferredOutStatus }
+      );
+    }
 
-    res.json(activeStudents);
+    queryBuilder.andWhere('student.isActive IS DISTINCT FROM false');
+
+    if (genderFilter) {
+      queryBuilder.andWhere('LOWER(student.gender) = :gender', { gender: genderFilter });
+    }
+
+    if (studentTypeFilter) {
+      queryBuilder.andWhere('LOWER(student.studentType) = :studentType', { studentType: studentTypeFilter });
+    }
+
+    if (searchQuery) {
+      queryBuilder.andWhere(
+        `(
+          LOWER(student.firstName) LIKE :search OR
+          LOWER(student.lastName) LIKE :search OR
+          LOWER(CONCAT(student.firstName, ' ', student.lastName)) LIKE :search OR
+          LOWER(student.studentNumber) LIKE :search OR
+          LOWER(student.contactNumber) LIKE :search OR
+          LOWER(student.phoneNumber) LIKE :search
+        )`,
+        { search: `%${searchQuery}%` }
+      );
+    }
+
+    if (pagination.isPaginated) {
+      const [students, total] = await queryBuilder
+        .skip(pagination.skip)
+        .take(pagination.limit)
+        .getManyAndCount();
+
+      return res.json(
+        buildPaginationResponse(students, pagination.page, pagination.limit, total)
+      );
+    }
+
+    const students = await queryBuilder.getMany();
+    res.json(students);
   } catch (error: any) {
     console.error('Error fetching students:', error);
-    res.status(500).json({ 
-      message: 'Server error', 
+    res.status(500).json({
+      message: 'Server error',
       error: error.message || 'Unknown error',
       stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
     });
@@ -479,25 +457,15 @@ export const getStudentById = async (req: AuthRequest, res: Response) => {
   }
 };
 
+// Enrollment is now handled by the enrollment controller at /api/enrollments
+// This function is kept for backward compatibility but should use the enrollment controller
 export const enrollStudent = async (req: AuthRequest, res: Response) => {
   try {
-    const { studentId, classId } = req.body;
-    const studentRepository = AppDataSource.getRepository(Student);
-    const classRepository = AppDataSource.getRepository(Class);
-
-    const student = await studentRepository.findOne({ where: { id: studentId } });
-    const classEntity = await classRepository.findOne({ where: { id: classId } });
-
-    if (!student || !classEntity) {
-      return res.status(404).json({ message: 'Student or class not found' });
-    }
-
-    student.classId = classId;
-    await studentRepository.save(student);
-
-    res.json({ message: 'Student enrolled successfully', student });
-  } catch (error) {
-    res.status(500).json({ message: 'Server error', error });
+    // Redirect to enrollment controller logic
+    const enrollmentController = await import('./enrollment.controller');
+    return enrollmentController.enrollStudent(req, res);
+  } catch (error: any) {
+    res.status(500).json({ message: 'Server error', error: error.message });
   }
 };
 
@@ -947,6 +915,92 @@ export const generateStudentIdCard = async (req: AuthRequest, res: Response) => 
   } catch (error) {
     console.error('Error generating student ID card:', error);
     return res.status(500).json({ message: 'Failed to generate student ID card' });
+  }
+};
+
+// Get DH Services Report - Students using dining hall
+export const getDHServicesReport = async (req: AuthRequest, res: Response) => {
+  try {
+    if (!AppDataSource.isInitialized) {
+      await AppDataSource.initialize();
+    }
+
+    const studentRepository = AppDataSource.getRepository(Student);
+    
+    // Get only day scholar students who use dining hall (exclude boarders)
+    const students = await studentRepository.find({
+      where: {
+        studentType: 'Day Scholar',
+        usesDiningHall: true,
+        isActive: true
+      },
+      relations: ['classEntity'],
+      order: { lastName: 'ASC', firstName: 'ASC' }
+    });
+
+    // Format the report data
+    const reportData = students.map(student => ({
+      studentNumber: student.studentNumber,
+      firstName: student.firstName,
+      lastName: student.lastName,
+      gender: student.gender,
+      class: student.classEntity?.name || 'N/A',
+      studentType: student.studentType,
+      contactNumber: student.contactNumber || student.phoneNumber || 'N/A',
+      isStaffChild: student.isStaffChild || false
+    }));
+
+    res.json({
+      success: true,
+      count: reportData.length,
+      students: reportData
+    });
+  } catch (error) {
+    console.error('Error fetching DH Services report:', error);
+    res.status(500).json({ message: 'Failed to fetch DH Services report', error: error instanceof Error ? error.message : 'Unknown error' });
+  }
+};
+
+// Get Transport Services Report - Students using school transport
+export const getTransportServicesReport = async (req: AuthRequest, res: Response) => {
+  try {
+    if (!AppDataSource.isInitialized) {
+      await AppDataSource.initialize();
+    }
+
+    const studentRepository = AppDataSource.getRepository(Student);
+    
+    // Get only day scholar students who use transport (usesTransport = true)
+    const students = await studentRepository.find({
+      where: {
+        studentType: 'Day Scholar',
+        usesTransport: true,
+        isActive: true
+      },
+      relations: ['classEntity'],
+      order: { lastName: 'ASC', firstName: 'ASC' }
+    });
+
+    // Format the report data
+    const reportData = students.map(student => ({
+      studentNumber: student.studentNumber,
+      firstName: student.firstName,
+      lastName: student.lastName,
+      gender: student.gender,
+      class: student.classEntity?.name || 'N/A',
+      studentType: student.studentType,
+      contactNumber: student.contactNumber || student.phoneNumber || 'N/A',
+      isStaffChild: student.isStaffChild || false
+    }));
+
+    res.json({
+      success: true,
+      count: reportData.length,
+      students: reportData
+    });
+  } catch (error) {
+    console.error('Error fetching Transport Services report:', error);
+    res.status(500).json({ message: 'Failed to fetch Transport Services report', error: error instanceof Error ? error.message : 'Unknown error' });
   }
 };
 

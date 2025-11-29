@@ -3,8 +3,11 @@ import { Teacher } from './Teacher';
 import { Class } from './Class';
 import { Exam } from './Exam';
 
+export type SubjectCategory = 'IGCSE' | 'AS_A_LEVEL';
+
 @Entity('subjects')
 @Index(['code'], { unique: true })
+@Index(['name', 'category'])
 export class Subject {
   @PrimaryGeneratedColumn('uuid')
   id: string;
@@ -14,6 +17,9 @@ export class Subject {
 
   @Column()
   code: string;
+
+  @Column({ type: 'varchar', default: 'IGCSE' })
+  category: SubjectCategory;
 
   @Column({ nullable: true })
   description: string;

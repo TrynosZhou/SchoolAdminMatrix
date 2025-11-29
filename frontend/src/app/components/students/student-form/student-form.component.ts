@@ -221,15 +221,12 @@ export class StudentFormComponent implements OnInit {
       return;
     }
 
-    if (!this.student.classId) {
-      this.error = 'Please select a class for enrollment';
-      this.submitting = false;
-      return;
-    }
+    // Class is now optional - students can be enrolled later
+    // Validation removed - classId can be empty
 
     const studentAge = this.calculateAge(this.student.dateOfBirth);
-    if (studentAge < 4 || studentAge > 12) {
-      this.error = 'Students must be between 4 and 12 years old at registration';
+    if (studentAge < 11 || studentAge > 20) {
+      this.error = 'Students must be between 11 and 20 years old at registration';
       this.submitting = false;
       return;
     }

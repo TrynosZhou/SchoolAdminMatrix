@@ -81,16 +81,38 @@
         </div>
 
         <div class="form-group">
-          <label for="phoneNumber">Phone Number</label>
+          <label for="qualification">Qualification</label>
+          <input 
+            type="text" 
+            id="qualification"
+            [(ngModel)]="teacher.qualification" 
+            name="qualification"
+            placeholder="e.g., Bachelor of Education, Master's Degree, etc."
+            class="form-input">
+          <small class="form-hint">Teacher's academic or professional qualification</small>
+        </div>
+
+        <div class="form-group">
+          <label for="phoneNumber">Phone Number <span class="required">*</span></label>
           <input 
             type="tel" 
             id="phoneNumber"
             [(ngModel)]="teacher.phoneNumber" 
             name="phoneNumber"
-            placeholder="e.g., +254 712 345 678"
+            required
+            minlength="9"
+            maxlength="16"
+            pattern="^\\+?\\d{9,15}$"
+            #phoneNumberModel="ngModel"
+            placeholder="e.g., +263771234567"
             class="form-input"
-            pattern="[0-9+\s\-()]+">
-          <small class="form-hint">Contact phone number</small>
+            inputmode="tel"
+            autocomplete="tel"
+            [class.error]="phoneNumberModel.invalid && (phoneNumberModel.dirty || phoneNumberModel.touched || teacherForm.submitted)">
+          <div class="field-error" *ngIf="phoneNumberModel.invalid && (phoneNumberModel.dirty || phoneNumberModel.touched || teacherForm.submitted)">
+            {{ getPhoneNumberError(phoneNumberModel) }}
+          </div>
+          <small class="form-hint">Enter an international format number without spaces</small>
         </div>
       </div>
 
@@ -134,20 +156,19 @@
       </div>
     </div>
 
-    <!-- Teaching Assignments Section -->
+    <!-- Teaching Subjects Section -->
     <div class="form-section">
       <div class="section-header">
         <h2>
           <span class="section-icon">📚</span>
-          Teaching Assignments
+          Teaching Subjects
         </h2>
-        <p class="section-description">Select subjects and classes this teacher will teach</p>
+        <p class="section-description">Select all subjects this teacher specializes in</p>
       </div>
 
-      <!-- Subjects Selection -->
       <div class="form-group">
         <label for="subjectSearch">
-          Subjects <span class="badge">{{ teacher.subjectIds.length }} selected</span>
+          Teaching Subjects <span class="badge">{{ teacher.subjectIds.length }} selected</span>
         </label>
         <div class="search-box">
           <input 
@@ -164,11 +185,11 @@
           <div 
             *ngFor="let subject of filteredSubjects" 
             class="checkbox-item"
-            [class.selected]="teacher.subjectIds.includes(subject.id)">
+            [class.selected]="isSubjectSelected(subject.id)">
             <label class="checkbox-label">
               <input 
                 type="checkbox" 
-                [checked]="teacher.subjectIds.includes(subject.id)" 
+                [checked]="isSubjectSelected(subject.id)" 
                 (change)="toggleSubject(subject.id)"
                 class="checkbox-input">
               <span class="checkbox-custom"></span>
@@ -179,45 +200,7 @@
         <div class="empty-state" *ngIf="filteredSubjects.length === 0">
           <p>No subjects found. Try a different search term.</p>
         </div>
-        <small class="form-hint">Select all subjects this teacher will teach</small>
-      </div>
-
-      <!-- Classes Selection -->
-      <div class="form-group">
-        <label for="classSearch">
-          Classes <span class="badge">{{ teacher.classIds.length }} selected</span>
-        </label>
-        <div class="search-box">
-          <input 
-            type="text" 
-            id="classSearch"
-            [(ngModel)]="classSearchQuery" 
-            name="classSearch"
-            placeholder="Search classes..."
-            class="search-input"
-            (input)="filterClasses()">
-          <span class="search-icon">🔍</span>
-        </div>
-        <div class="checkbox-group" *ngIf="filteredClasses.length > 0">
-          <div 
-            *ngFor="let cls of filteredClasses" 
-            class="checkbox-item"
-            [class.selected]="teacher.classIds.includes(cls.id)">
-            <label class="checkbox-label">
-              <input 
-                type="checkbox" 
-                [checked]="teacher.classIds.includes(cls.id)" 
-                (change)="toggleClass(cls.id)"
-                class="checkbox-input">
-              <span class="checkbox-custom"></span>
-              <span class="checkbox-text">{{ cls.name }}</span>
-            </label>
-          </div>
-        </div>
-        <div class="empty-state" *ngIf="filteredClasses.length === 0">
-          <p>No classes found. Try a different search term.</p>
-        </div>
-        <small class="form-hint">Select all classes this teacher will be assigned to</small>
+        <small class="form-hint">Select all subjects this teacher specializes in. Multiple selections are allowed.</small>
       </div>
     </div>
 

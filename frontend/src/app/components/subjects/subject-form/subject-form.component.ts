@@ -1,6 +1,7 @@
 import { Component, OnInit, ChangeDetectorRef, AfterViewChecked } from '@angular/core';
 import { ActivatedRoute, Router } from '@angular/router';
 import { SubjectService } from '../../../services/subject.service';
+import { SubjectUtilsService, SubjectCategory } from '../../../services/subject-utils.service';
 import { trigger, state, style, transition, animate } from '@angular/animations';
 
 @Component({
@@ -24,12 +25,14 @@ export class SubjectFormComponent implements OnInit, AfterViewChecked {
     name: '',
     code: '',
     description: '',
+    category: 'IGCSE',
     isActive: true
   };
   isEdit = false;
   error = '';
   success = '';
   submitting = false;
+  categories: Array<{ value: SubjectCategory; label: string }> = [];
   
   // Form validation
   fieldErrors: any = {};
@@ -38,10 +41,13 @@ export class SubjectFormComponent implements OnInit, AfterViewChecked {
 
   constructor(
     private subjectService: SubjectService,
+    private subjectUtils: SubjectUtilsService,
     private route: ActivatedRoute,
     public router: Router,
     private cdr: ChangeDetectorRef
-  ) { }
+  ) {
+    this.categories = this.subjectUtils.getCategories();
+  }
 
   ngOnInit() {
     const id = this.route.snapshot.params['id'];
@@ -64,13 +70,20 @@ export class SubjectFormComponent implements OnInit, AfterViewChecked {
   loadSubject(id: string) {
     this.subjectService.getSubjectById(id).subscribe({
       next: (data: any) => {
-        this.subject = data;
+        this.subject = {
+          ...data,
+          category: data.category || 'IGCSE'
+        };
       },
       error: (err: any) => {
         this.error = 'Failed to load subject';
         setTimeout(() => this.error = '', 5000);
       }
     });
+  }
+
+  getCategoryLabel(category: SubjectCategory | string | null | undefined): string {
+    return this.subjectUtils.getCategoryLabel(category);
   }
 
   onCodeChange() {
@@ -172,6 +185,7 @@ export class SubjectFormComponent implements OnInit, AfterViewChecked {
       name: this.subject.name.trim(),
       code: this.subject.code.trim().toUpperCase(),
       description: this.subject.description?.trim() || '',
+      category: this.subject.category || 'IGCSE',
       isActive: this.subject.isActive !== false
     };
 

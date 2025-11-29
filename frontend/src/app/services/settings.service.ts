@@ -15,6 +15,10 @@ export class SettingsService {
     return this.http.get(`${this.apiUrl}/settings`);
   }
 
+  getPublicSplashSettings(): Observable<any> {
+    return this.http.get(`${this.apiUrl}/settings/public/splash`);
+  }
+
   updateSettings(settings: any): Observable<any> {
     return this.http.put(`${this.apiUrl}/settings`, settings);
   }

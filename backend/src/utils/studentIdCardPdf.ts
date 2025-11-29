@@ -57,22 +57,39 @@ export async function createStudentIdCardPDF(data: StudentIdCardData): Promise<B
         .strokeColor('#1F4B99')
         .stroke();
 
-      // Header bar
-      doc.rect(10, 10, doc.page.width - 20, 36)
+      // Header bar - increased height to accommodate longer addresses
+      const headerHeight = 50; // Increased from 36 to 50
+      doc.rect(10, 10, doc.page.width - 20, headerHeight)
         .fillColor('#1F4B99')
         .fill();
 
+      // School name - displayed only once at the top (large, bold)
       doc.fontSize(16).font('Helvetica-Bold').fillColor('#FFFFFF');
-      doc.text(schoolName, 15, 18, { width: doc.page.width - 30, align: 'center' });
+      doc.text(schoolName, 15, 18, { 
+        width: doc.page.width - 30, 
+        align: 'center'
+      });
 
+      // Address and phone - positioned below school name, ensuring no duplicate school name
+      // Only show address and phone, not school name again
       if (schoolAddress || schoolPhone) {
         doc.fontSize(8).font('Helvetica').fillColor('#E7ECF6');
-        const contactLine = [schoolAddress, schoolPhone].filter(Boolean).join(' | ');
-        doc.text(contactLine, 15, 34, { width: doc.page.width - 30, align: 'center' });
+        // Ensure school name is not accidentally included in address or phone
+        let contactLine = [schoolAddress, schoolPhone].filter(Boolean).join(' | ');
+        // Remove any accidental school name from contact line
+        contactLine = contactLine.replace(new RegExp(schoolName, 'gi'), '').trim();
+        // Clean up any double separators
+        contactLine = contactLine.replace(/\s*\|\s*\|\s*/g, ' | ').replace(/^\s*\|\s*|\s*\|\s*$/g, '');
+        
+        // Position address text lower to allow for wrapping, with more space from bottom
+        // Start at Y=36 to give room for school name above
+        if (contactLine) {
+          doc.text(contactLine, 15, 36, { width: doc.page.width - 30, align: 'center' });
+        }
       }
 
-      // Student information panel
-      const infoBoxY = 56;
+      // Student information panel - adjusted Y position to account for taller header
+      const infoBoxY = 70; // Increased from 56 to 70 (10 + headerHeight + 10 spacing)
       doc.roundedRect(18, infoBoxY, 200, 120, 10)
         .fillColor('#FFFFFF')
         .fill()

@@ -37,7 +37,7 @@ export class AuthInterceptor implements HttpInterceptor {
           if (!isAuthEndpoint && token) {
             // Token is invalid or expired - clear it and redirect to login
             console.warn('Authentication failed - token may be expired or invalid');
-            this.authService.logout();
+            this.authService.logout('unauthorized');
           }
         }
         

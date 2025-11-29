@@ -4,6 +4,9 @@ import { Class } from './Class';
 import { Parent } from './Parent';
 import { Marks } from './Marks';
 import { Invoice } from './Invoice';
+import { StudentEnrollment } from './StudentEnrollment';
+
+export type EnrollmentStatus = 'Not Enrolled' | 'Enrolled' | 'Transferred Out';
 
 @Entity('students')
 @Index(['studentNumber'], { unique: true })
@@ -50,18 +53,21 @@ export class Student {
   @Column({ type: 'varchar', nullable: true })
   photo: string | null; // Path to student's passport photo
 
-  @Column({ type: 'timestamp', default: () => 'CURRENT_TIMESTAMP' })
-  enrollmentDate: Date;
-
   @Column({ default: true })
   isActive: boolean;
 
-  @ManyToOne(() => Class, classEntity => classEntity.students)
+  @Column({ type: 'enum', enum: ['Not Enrolled', 'Enrolled', 'Transferred Out'], default: 'Not Enrolled' })
+  enrollmentStatus: EnrollmentStatus;
+
+  @ManyToOne(() => Class, classEntity => classEntity.students, { nullable: true })
   @JoinColumn({ name: 'classId' })
-  classEntity: Class;
+  classEntity: Class | null;
 
   @Column({ nullable: true })
   classId: string | null;
+
+  @OneToMany(() => StudentEnrollment, enrollment => enrollment.student)
+  enrollments: StudentEnrollment[];
 
   @OneToOne(() => User, user => user.student)
   user: User;

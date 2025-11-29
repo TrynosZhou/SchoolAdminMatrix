@@ -6,11 +6,17 @@
         <span class="header-icon">👨‍🎓</span>
         Students
       </h1>
-      <p class="subtitle">Manage and view all enrolled students</p>
+      <p class="subtitle">Manage and view all students (enrolled and unenrolled)</p>
     </div>
     <div class="header-actions">
+      <button class="btn btn-secondary" routerLink="/transfers/history">
+        <span>🔄</span> Transfer History
+      </button>
+      <button class="btn btn-secondary" routerLink="/transfers/new">
+        <span>📤</span> Transfer Student
+      </button>
       <button class="btn btn-primary" routerLink="/students/new">
-        <span>➕</span> Add New Student
+        <span>➕</span> Register New Student
       </button>
     </div>
   </div>
@@ -20,7 +26,7 @@
     <div class="stat-card">
       <div class="stat-icon">👥</div>
       <div class="stat-content">
-        <div class="stat-value">{{ students.length }}</div>
+        <div class="stat-value">{{ pagination.total || students.length }}</div>
         <div class="stat-label">Total Students</div>
       </div>
     </div>
@@ -76,7 +82,7 @@
           [ngModelOptions]="{standalone: true}"
           placeholder="Search by name, student number, or contact..."
           class="search-input"
-          (input)="filterStudents()">
+          (input)="onSearchInput()">
         <span class="search-icon">🔍</span>
       </div>
       <div class="filter-options">
@@ -138,6 +144,24 @@
     </div>
   </div>
 
+  <div class="pagination-bar" *ngIf="!loading && (pagination.totalPages > 1 || pagination.total > pagination.limit)">
+    <button class="btn btn-secondary" (click)="changePage(pagination.page - 1)" [disabled]="pagination.page === 1">
+      ‹ Previous
+    </button>
+    <span class="page-info">
+      Page {{ pagination.page }} of {{ pagination.totalPages }} • {{ pagination.total }} records
+    </span>
+    <button class="btn btn-secondary" (click)="changePage(pagination.page + 1)" [disabled]="pagination.page === pagination.totalPages">
+      Next ›
+    </button>
+    <div class="page-size-selector">
+      <label for="pageSize">Rows per page:</label>
+      <select id="pageSize" (change)="changePageSize($event.target.value)" [value]="pagination.limit">
+        <option *ngFor="let size of pageSizeOptions" [value]="size">{{ size }}</option>
+      </select>
+    </div>
+  </div>
+
   <!-- Loading State -->
   <div class="loading-state" *ngIf="loading">
     <div class="spinner-large"></div>
@@ -167,9 +191,15 @@
             <span class="info-label">Student #</span>
             <span class="info-value student-id-link" (click)="viewStudentIdCard(student.id)" title="View Student ID Card">{{ student.studentNumber }}</span>
           </div>
-          <div class="info-item" *ngIf="student.class">
+          <div class="info-item">
             <span class="info-label">Class</span>
-            <span class="info-value">{{ student.class.name }}</span>
+            <span class="info-value">{{ getClassName(student) }}</span>
+          </div>
+          <div class="info-item">
+            <span class="info-label">Status</span>
+            <span class="status-badge" [ngClass]="getEnrollmentStatusClass(student)">
+              {{ getEnrollmentStatus(student) }}
+            </span>
           </div>
           <div class="info-item" *ngIf="student.contactNumber || student.phoneNumber">
             <span class="info-label">Contact</span>
@@ -201,6 +231,7 @@
       <div class="list-col number-col">Student #</div>
       <div class="list-col name-col">Name</div>
       <div class="list-col class-col">Class</div>
+      <div class="list-col status-col">Status</div>
       <div class="list-col contact-col">Contact</div>
       <div class="list-col type-col">Type</div>
       <div class="list-col gender-col">Gender</div>
@@ -221,7 +252,12 @@
           <span class="name-text">{{ student.firstName }} {{ student.lastName }}</span>
         </div>
       </div>
-      <div class="list-col class-col">{{ student.class?.name || 'N/A' }}</div>
+      <div class="list-col class-col">{{ getClassName(student) }}</div>
+      <div class="list-col status-col">
+        <span class="status-badge" [ngClass]="getEnrollmentStatusClass(student)">
+          {{ getEnrollmentStatus(student) }}
+        </span>
+      </div>
       <div class="list-col contact-col">{{ student.contactNumber || student.phoneNumber || 'N/A' }}</div>
       <div class="list-col type-col">
         <span class="type-badge" [class.boarder]="student.studentType === 'Boarder'" [class.day-scholar]="student.studentType === 'Day Scholar'">

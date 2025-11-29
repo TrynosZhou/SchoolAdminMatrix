@@ -1,6 +1,7 @@
 import { Component, OnInit } from '@angular/core';
 import { Router, ActivatedRoute } from '@angular/router';
 import { SubjectService } from '../../../services/subject.service';
+import { SubjectUtilsService } from '../../../services/subject-utils.service';
 
 @Component({
   selector: 'app-subject-list',
@@ -20,12 +21,25 @@ export class SubjectListComponent implements OnInit {
   sortBy: string = 'name';
   sortColumn: string = 'name';
   sortDirection: 'asc' | 'desc' = 'asc';
+  pagination = {
+    page: 1,
+    limit: 12,
+    total: 0,
+    totalPages: 1
+  };
+  pageSizeOptions = [12, 24, 48];
+  private searchDebounceTimer: any = null;
 
   constructor(
     private subjectService: SubjectService,
+    private subjectUtils: SubjectUtilsService,
     private router: Router,
     private route: ActivatedRoute
   ) { }
+
+  getCategoryLabel(category: string | null | undefined): string {
+    return this.subjectUtils.getCategoryLabel(category);
+  }
 
   ngOnInit() {
     // Check for success message from query parameters
@@ -51,11 +65,22 @@ export class SubjectListComponent implements OnInit {
   loadSubjects() {
     this.loading = true;
     this.error = '';
-    this.subjectService.getSubjects().subscribe({
+    this.subjectService.getSubjects({
+      page: this.pagination.page,
+      limit: this.pagination.limit,
+      search: this.searchTerm || undefined
+    }).subscribe({
       next: (data: any) => {
-        this.subjects = data || [];
-        this.filteredSubjects = [...this.subjects];
-        this.sortSubjects();
+        if (Array.isArray(data)) {
+          this.subjects = data;
+          this.pagination.total = data.length;
+          this.pagination.totalPages = 1;
+        } else {
+          this.subjects = data?.data || [];
+          this.pagination.total = data?.total || this.subjects.length;
+          this.pagination.totalPages = data?.totalPages || 1;
+        }
+        this.applyFilters();
         this.loading = false;
       },
       error: (err: any) => {
@@ -86,21 +111,17 @@ export class SubjectListComponent implements OnInit {
   }
 
   filterSubjects() {
+    this.applyFilters();
+  }
+
+  private applyFilters() {
     this.filteredSubjects = this.subjects.filter(subject => {
-      // Search filter
-      const matchesSearch = !this.searchTerm || 
-        subject.code?.toLowerCase().includes(this.searchTerm.toLowerCase()) ||
-        subject.name?.toLowerCase().includes(this.searchTerm.toLowerCase()) ||
-        subject.description?.toLowerCase().includes(this.searchTerm.toLowerCase());
-      
-      // Status filter
       const matchesStatus = this.statusFilter === 'all' ||
         (this.statusFilter === 'active' && subject.isActive) ||
         (this.statusFilter === 'inactive' && !subject.isActive);
-      
-      return matchesSearch && matchesStatus;
+      return matchesStatus;
     });
-    
+
     this.sortSubjects();
   }
 
@@ -152,13 +173,15 @@ export class SubjectListComponent implements OnInit {
 
   clearSearch() {
     this.searchTerm = '';
-    this.filterSubjects();
+    this.pagination.page = 1;
+    this.loadSubjects();
   }
 
   clearFilters() {
     this.searchTerm = '';
     this.statusFilter = 'all';
-    this.filterSubjects();
+    this.pagination.page = 1;
+    this.loadSubjects();
   }
 
   truncate(text: string, length: number): string {
@@ -238,6 +261,32 @@ export class SubjectListComponent implements OnInit {
         }, 8000);
       }
     });
+  }
+
+  onSearchInput() {
+    if (this.searchDebounceTimer) {
+      clearTimeout(this.searchDebounceTimer);
+    }
+    this.searchDebounceTimer = setTimeout(() => {
+      this.pagination.page = 1;
+      this.loadSubjects();
+    }, 400);
+  }
+
+  changePage(page: number) {
+    if (page < 1 || page > this.pagination.totalPages || page === this.pagination.page) {
+      return;
+    }
+    this.pagination.page = page;
+    this.loadSubjects();
+  }
+
+  changePageSize(limit: string | number) {
+    const parsedLimit = typeof limit === 'string' ? parseInt(limit, 10) : limit;
+    if (!parsedLimit || parsedLimit === this.pagination.limit) return;
+    this.pagination.limit = parsedLimit;
+    this.pagination.page = 1;
+    this.loadSubjects();
   }
 }
 

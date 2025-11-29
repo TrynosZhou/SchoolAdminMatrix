@@ -13,6 +13,16 @@ import { ClassService } from '../../services/class.service';
 export class SettingsComponent implements OnInit {
   settings: any = {
     studentIdPrefix: 'JPS',
+    gradePoints: {
+      excellent: 5,
+      veryGood: 5,
+      good: 4,
+      satisfactory: 3,
+      needsImprovement: 2,
+      basic: 1,
+      fail: 0
+    },
+    teacherIdPrefix: 'JPST',
     feesSettings: {
       dayScholarTuitionFee: 0,
       boarderTuitionFee: 0,
@@ -125,6 +135,16 @@ export class SettingsComponent implements OnInit {
     }
   };
 
+  readonly gradePointRows = [
+    { label: 'A*', notes: 'Distinction (Top Level)', key: 'excellent', defaultPoints: 5 },
+    { label: 'A', notes: 'Distinction', key: 'veryGood', defaultPoints: 5 },
+    { label: 'B', notes: 'Merit', key: 'good', defaultPoints: 4 },
+    { label: 'C', notes: 'Credit', key: 'satisfactory', defaultPoints: 3 },
+    { label: 'D', notes: 'Pass', key: 'needsImprovement', defaultPoints: 2 },
+    { label: 'E', notes: 'Minimal Pass', key: 'basic', defaultPoints: 1 },
+    { label: 'U', notes: 'Ungraded / Fail', key: 'fail', defaultPoints: 0 }
+  ] as const;
+
   loading = false;
   error = '';
   success = '';
@@ -224,6 +244,11 @@ export class SettingsComponent implements OnInit {
           this.settings.activeTerm = this.settings.currentTerm;
         }
         
+        // Initialize teacherIdPrefix if not present
+        if (!this.settings.teacherIdPrefix) {
+          this.settings.teacherIdPrefix = 'JPST';
+        }
+        
         if (!this.settings.feesSettings) {
           this.settings.feesSettings = {
             dayScholarTuitionFee: 0,
@@ -280,6 +305,14 @@ export class SettingsComponent implements OnInit {
             fail: 'UNCLASSIFIED'
           };
         }
+        if (!this.settings.gradePoints) {
+          this.settings.gradePoints = {};
+        }
+        this.gradePointRows.forEach(row => {
+          if (this.settings.gradePoints[row.key] === undefined || this.settings.gradePoints[row.key] === null) {
+            this.settings.gradePoints[row.key] = row.defaultPoints;
+          }
+        });
         if (!this.settings.currencySymbol) {
           this.settings.currencySymbol = 'KES';
         }
@@ -415,6 +448,10 @@ export class SettingsComponent implements OnInit {
         console.error('Error loading settings:', err);
         this.error = 'Failed to load settings';
         this.loading = false;
+        this.settings.gradePoints = this.gradePointRows.reduce((acc, row) => {
+          acc[row.key] = row.defaultPoints;
+          return acc;
+        }, {} as Record<string, number>);
       }
     });
   }

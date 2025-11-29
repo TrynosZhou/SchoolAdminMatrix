@@ -13,6 +13,7 @@ import { Student } from '../entities/Student';
 import { User } from '../entities/User';
 import { ensureDemoDataAvailable } from '../utils/demoDataEnsurer';
 import { linkClassToTeachers } from '../utils/teacherClassLinker';
+import { buildPaginationResponse, parsePaginationParams } from '../utils/pagination';
 
 const router = Router();
 
@@ -130,7 +131,27 @@ router.get('/', authenticate, async (req: AuthRequest, res) => {
       subjects: Array.isArray(c.subjects) ? c.subjects : []
     }));
     
-    res.json(classes);
+    const pagination = parsePaginationParams(req.query);
+    const searchQuery = typeof req.query.search === 'string' ? req.query.search.trim().toLowerCase() : '';
+
+    let normalizedClasses = Array.isArray(classes) ? classes : [];
+
+    if (searchQuery) {
+      normalizedClasses = normalizedClasses.filter((classItem: any) => {
+        const name = (classItem.name || '').toLowerCase();
+        const form = (classItem.form || '').toLowerCase();
+        const description = (classItem.description || '').toLowerCase();
+        return name.includes(searchQuery) || form.includes(searchQuery) || description.includes(searchQuery);
+      });
+    }
+
+    if (pagination.isPaginated) {
+      const total = normalizedClasses.length;
+      const paged = normalizedClasses.slice(pagination.skip, pagination.skip + pagination.limit);
+      return res.json(buildPaginationResponse(paged, pagination.page, pagination.limit, total));
+    }
+
+    res.json(normalizedClasses);
   } catch (error: any) {
     console.error('[getClasses] Error:', error);
     console.error('[getClasses] Error stack:', error.stack);

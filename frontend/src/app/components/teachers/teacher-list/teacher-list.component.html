@@ -24,7 +24,7 @@
     <div class="stat-card">
       <div class="stat-icon">👥</div>
       <div class="stat-content">
-        <div class="stat-value">{{ teachers.length }}</div>
+        <div class="stat-value">{{ pagination.total || teachers.length }}</div>
         <div class="stat-label">Total Teachers</div>
       </div>
     </div>
@@ -70,7 +70,7 @@
           [ngModelOptions]="{standalone: true}"
           placeholder="Search by name, employee number, or phone..."
           class="search-input"
-          (input)="filterTeachers()">
+          (input)="onSearchInput()">
         <span class="search-icon">🔍</span>
       </div>
       <div class="filter-options">
@@ -118,6 +118,24 @@
           </div>
         </div>
       </div>
+    </div>
+  </div>
+
+  <div class="pagination-bar" *ngIf="!loading && (pagination.totalPages > 1 || pagination.total > pagination.limit)">
+    <button class="btn btn-secondary" (click)="changePage(pagination.page - 1)" [disabled]="pagination.page === 1">
+      ‹ Previous
+    </button>
+    <span class="page-info">
+      Page {{ pagination.page }} of {{ pagination.totalPages }} • {{ pagination.total }} records
+    </span>
+    <button class="btn btn-secondary" (click)="changePage(pagination.page + 1)" [disabled]="pagination.page === pagination.totalPages">
+      Next ›
+    </button>
+    <div class="page-size-selector">
+      <label for="teacherPageSize">Rows per page:</label>
+      <select id="teacherPageSize" (change)="changePageSize($event.target.value)" [value]="pagination.limit">
+        <option *ngFor="let size of pageSizeOptions" [value]="size">{{ size }}</option>
+      </select>
     </div>
   </div>
 
@@ -280,7 +298,7 @@
           </div>
         </div>
         <div class="detail-section" *ngIf="selectedTeacher.subjects && selectedTeacher.subjects.length > 0">
-          <h3>Subjects ({{ selectedTeacher.subjects.length }})</h3>
+          <h3>Teaching Subjects ({{ selectedTeacher.subjects.length }})</h3>
           <div class="tags-container">
             <span *ngFor="let subject of selectedTeacher.subjects" class="subject-tag">
               {{ subject.name }}

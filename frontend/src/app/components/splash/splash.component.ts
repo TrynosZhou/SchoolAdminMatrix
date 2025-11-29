@@ -15,7 +15,7 @@ export class SplashComponent implements OnInit, OnDestroy {
   schoolName = 'Junior Primary School';
   schoolLogo: string | null = null;
   readonly defaultLogoPath = 'assets/logo.jpg';
-  readonly tagline = 'School Management System – Powered by Trynos Zhou';
+  tagline = 'School Management System – Powered by Trynos Zhou';
   loadingSettings = true;
 
   constructor(
@@ -43,7 +43,7 @@ export class SplashComponent implements OnInit, OnDestroy {
   }
 
   private loadSettings(): void {
-    this.settingsSubscription = this.settingsService.getSettings().subscribe({
+    this.settingsSubscription = this.settingsService.getPublicSplashSettings().subscribe({
       next: (settings: any) => {
         if (settings?.schoolName) {
           this.schoolName = settings.schoolName;
@@ -52,6 +52,9 @@ export class SplashComponent implements OnInit, OnDestroy {
           this.schoolLogo = settings.schoolLogo;
         } else if (settings?.schoolLogo2) {
           this.schoolLogo = settings.schoolLogo2;
+        }
+        if (settings?.schoolMotto) {
+          this.tagline = settings.schoolMotto;
         }
         this.loadingSettings = false;
       },

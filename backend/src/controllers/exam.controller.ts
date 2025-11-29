@@ -51,6 +51,16 @@ function assignPositionsWithTies<T extends { studentId: string } & ({ average?: 
   return result;
 }
 
+const DEFAULT_GRADE_POINTS = {
+  excellent: 5, // A*
+  veryGood: 5, // A
+  good: 4,     // B
+  satisfactory: 3, // C
+  needsImprovement: 2, // D
+  basic: 1, // E
+  fail: 0 // U
+} as const;
+
 export const createExam = async (req: AuthRequest, res: Response) => {
   try {
     // Ensure database is initialized
@@ -1208,11 +1218,7 @@ export const getReportCard = async (req: AuthRequest, res: Response) => {
       return res.status(400).json({ message: 'Class ID, term, and exam type are required' });
     }
 
-    // For teachers, subjectId is required
-    if (isTeacher && !subjectId) {
-      console.log('[getReportCard] Teacher request missing subjectId');
-      return res.status(400).json({ message: 'Subject ID is required for teachers' });
-    }
+    // Subject filter is optional for all roles; teachers will see their assigned class subjects
 
     // For parents, check balance before allowing access
     if (isParent && studentId) {
@@ -1285,6 +1291,10 @@ export const getReportCard = async (req: AuthRequest, res: Response) => {
     if (!classEntity) {
       return res.status(404).json({ message: 'Class not found' });
     }
+
+    const classFormText = `${classEntity.form || ''} ${classEntity.name || ''}`.toLowerCase();
+    const upperFormKeywords = ['form 5', 'form five', 'form v', 'form 6', 'form six', 'form vi', 'lower six', 'upper six', 'a level', 'as level'];
+    const isUpperForm = upperFormKeywords.some(keyword => classFormText.includes(keyword));
 
     // For teachers, verify assignment to class and subject
     if (isTeacher && user?.teacher?.id) {
@@ -1479,15 +1489,41 @@ export const getReportCard = async (req: AuthRequest, res: Response) => {
       fail: 'UNCLASSIFIED'
     };
 
-    function getGrade(percentage: number): string {
-      if (percentage === 0) return gradeLabels.fail || 'UNCLASSIFIED';
-      if (percentage >= (thresholds.excellent || 90)) return gradeLabels.excellent || 'OUTSTANDING';
-      if (percentage >= (thresholds.veryGood || 80)) return gradeLabels.veryGood || 'VERY HIGH';
-      if (percentage >= (thresholds.good || 60)) return gradeLabels.good || 'HIGH';
-      if (percentage >= (thresholds.satisfactory || 40)) return gradeLabels.satisfactory || 'GOOD';
-      if (percentage >= (thresholds.needsImprovement || 20)) return gradeLabels.needsImprovement || 'ASPIRING';
-      if (percentage >= (thresholds.basic || 1)) return gradeLabels.basic || 'BASIC';
-      return gradeLabels.fail || 'UNCLASSIFIED';
+    const gradePoints = {
+      excellent: settings?.gradePoints?.excellent ?? DEFAULT_GRADE_POINTS.excellent,
+      veryGood: settings?.gradePoints?.veryGood ?? DEFAULT_GRADE_POINTS.veryGood,
+      good: settings?.gradePoints?.good ?? DEFAULT_GRADE_POINTS.good,
+      satisfactory: settings?.gradePoints?.satisfactory ?? DEFAULT_GRADE_POINTS.satisfactory,
+      needsImprovement: settings?.gradePoints?.needsImprovement ?? DEFAULT_GRADE_POINTS.needsImprovement,
+      basic: settings?.gradePoints?.basic ?? DEFAULT_GRADE_POINTS.basic,
+      fail: settings?.gradePoints?.fail ?? DEFAULT_GRADE_POINTS.fail
+    };
+
+    type GradeKey = keyof typeof gradePoints;
+
+    function getGradeInfo(percentage: number): { key: GradeKey; label: string } {
+      if (percentage === 0) {
+        return { key: 'fail', label: gradeLabels.fail || 'UNCLASSIFIED' };
+      }
+      if (percentage >= (thresholds.excellent || 90)) {
+        return { key: 'excellent', label: gradeLabels.excellent || 'OUTSTANDING' };
+      }
+      if (percentage >= (thresholds.veryGood || 80)) {
+        return { key: 'veryGood', label: gradeLabels.veryGood || 'VERY HIGH' };
+      }
+      if (percentage >= (thresholds.good || 60)) {
+        return { key: 'good', label: gradeLabels.good || 'HIGH' };
+      }
+      if (percentage >= (thresholds.satisfactory || 40)) {
+        return { key: 'satisfactory', label: gradeLabels.satisfactory || 'GOOD' };
+      }
+      if (percentage >= (thresholds.needsImprovement || 20)) {
+        return { key: 'needsImprovement', label: gradeLabels.needsImprovement || 'ASPIRING' };
+      }
+      if (percentage >= (thresholds.basic || 1)) {
+        return { key: 'basic', label: gradeLabels.basic || 'BASIC' };
+      }
+      return { key: 'fail', label: gradeLabels.fail || 'UNCLASSIFIED' };
     }
 
     // Get all marks for all students and exams, filtered by subject if provided
@@ -1731,6 +1767,8 @@ export const getReportCard = async (req: AuthRequest, res: Response) => {
           const totalScore = marksData.scores.reduce((a, b) => a + b, 0);
           const totalMaxScore = marksData.maxScores.reduce((a, b) => a + b, 0);
           const percentage = totalMaxScore > 0 ? (totalScore / totalMaxScore) * 100 : 0;
+          const gradeInfo = getGradeInfo(percentage);
+          const subjectPoints = isUpperForm ? (gradePoints[gradeInfo.key] ?? 0) : undefined;
           return {
             subject: subjectName,
             subjectCode: subjectCode,
@@ -1739,7 +1777,8 @@ export const getReportCard = async (req: AuthRequest, res: Response) => {
             percentage: Math.round(percentage).toString(),
             classAverage: classAverage,
             comments: marksData.comments.join('; ') || undefined,
-            grade: getGrade(percentage)
+            grade: gradeInfo.label,
+            points: subjectPoints
           };
         } else {
           // Student has no marks for this subject - show as N/A
@@ -1751,7 +1790,8 @@ export const getReportCard = async (req: AuthRequest, res: Response) => {
             percentage: '0',
             classAverage: classAverage,
             comments: 'Not taken',
-            grade: 'N/A'
+            grade: 'N/A',
+            points: undefined
           };
         }
       });
@@ -1760,6 +1800,9 @@ export const getReportCard = async (req: AuthRequest, res: Response) => {
       const subjectsWithMarks = subjectData.filter((sub: any) => sub.grade !== 'N/A');
       const totalPercentage = subjectsWithMarks.reduce((sum: number, sub: any) => sum + parseFloat(sub.percentage), 0);
       const overallAverage = subjectsWithMarks.length > 0 ? Math.round(totalPercentage / subjectsWithMarks.length) : 0;
+      const totalPoints = isUpperForm
+        ? subjectsWithMarks.reduce((sum: number, sub: any) => sum + (sub.points || 0), 0)
+        : undefined;
 
       // Find class position (only within the current class) - using position from tie-handled rankings
       const classRankEntry = classRankings.find(r => r.studentId === student.id);
@@ -1822,7 +1865,7 @@ export const getReportCard = async (req: AuthRequest, res: Response) => {
         })(),
         subjects: subjectData,
         overallAverage: overallAverage.toString(),
-        overallGrade: getGrade(overallAverage),
+        overallGrade: getGradeInfo(overallAverage).label,
         classPosition: classPosition || 0,
         formPosition: formPosition || 0,
         totalStudents: classRankings.length, // Add total number of students with marks for ranking
@@ -1835,6 +1878,8 @@ export const getReportCard = async (req: AuthRequest, res: Response) => {
           headmasterRemarks: remarks?.headmasterRemarks || null
         },
         generatedAt: new Date(),
+        totalPoints: totalPoints,
+        isUpperForm,
         settings: {
           schoolName: settings?.schoolName,
           schoolAddress: settings?.schoolAddress,
@@ -1850,7 +1895,7 @@ export const getReportCard = async (req: AuthRequest, res: Response) => {
       return res.status(404).json({ message: 'No report cards generated. No students found in this class.' });
     }
 
-    res.json({ reportCards, class: classEntity.name, examType, term: termValue });
+    res.json({ reportCards, class: classEntity.name, form: classEntity.form, examType, term: termValue, isUpperForm });
   } catch (error: any) {
     console.error('Error generating report cards:', error);
     console.error('Error stack:', error.stack);
@@ -1939,6 +1984,63 @@ export const generateReportCardPDF = async (req: AuthRequest, res: Response) => 
     const examRepository = AppDataSource.getRepository(Exam);
     const classRepository = AppDataSource.getRepository(Class);
 
+    // Load settings once for the PDF generation context
+    const pdfSettingsList = await settingsRepository.find({
+      order: { createdAt: 'DESC' },
+      take: 1
+    });
+    const activeSettings = pdfSettingsList.length > 0 ? pdfSettingsList[0] : null;
+
+    const thresholdsPdf = activeSettings?.gradeThresholds || {
+      excellent: 90,
+      veryGood: 80,
+      good: 70,
+      satisfactory: 60,
+      needsImprovement: 50,
+      basic: 1
+    };
+
+    const gradeLabelsPdf = activeSettings?.gradeLabels || {
+      excellent: 'Excellent',
+      veryGood: 'Very Good',
+      good: 'Good',
+      satisfactory: 'Satisfactory',
+      needsImprovement: 'Needs Improvement',
+      basic: 'Basic',
+      fail: 'Fail'
+    };
+
+    const defaultGradePointsPdf = {
+      excellent: 12,
+      veryGood: 10,
+      good: 8,
+      satisfactory: 6,
+      needsImprovement: 4,
+      basic: 2,
+      fail: 0
+    };
+
+    const gradePointsPdf = {
+      excellent: activeSettings?.gradePoints?.excellent ?? defaultGradePointsPdf.excellent,
+      veryGood: activeSettings?.gradePoints?.veryGood ?? defaultGradePointsPdf.veryGood,
+      good: activeSettings?.gradePoints?.good ?? defaultGradePointsPdf.good,
+      satisfactory: activeSettings?.gradePoints?.satisfactory ?? defaultGradePointsPdf.satisfactory,
+      needsImprovement: activeSettings?.gradePoints?.needsImprovement ?? defaultGradePointsPdf.needsImprovement,
+      basic: activeSettings?.gradePoints?.basic ?? defaultGradePointsPdf.basic,
+      fail: activeSettings?.gradePoints?.fail ?? defaultGradePointsPdf.fail
+    };
+
+    type GradeKeyPdf = keyof typeof gradePointsPdf;
+    const getGradeInfoPdf = (percentage: number): { key: GradeKeyPdf; label: string } => {
+      if (percentage >= (thresholdsPdf.excellent || 90)) return { key: 'excellent', label: gradeLabelsPdf.excellent || 'Excellent' };
+      if (percentage >= (thresholdsPdf.veryGood || 80)) return { key: 'veryGood', label: gradeLabelsPdf.veryGood || 'Very Good' };
+      if (percentage >= (thresholdsPdf.good || 70)) return { key: 'good', label: gradeLabelsPdf.good || 'Good' };
+      if (percentage >= (thresholdsPdf.satisfactory || 60)) return { key: 'satisfactory', label: gradeLabelsPdf.satisfactory || 'Satisfactory' };
+      if (percentage >= (thresholdsPdf.needsImprovement || 50)) return { key: 'needsImprovement', label: gradeLabelsPdf.needsImprovement || 'Needs Improvement' };
+      if (percentage >= (thresholdsPdf.basic || 1)) return { key: 'basic', label: gradeLabelsPdf.basic || 'Basic' };
+      return { key: 'fail', label: gradeLabelsPdf.fail || 'Fail' };
+    };
+
     // Support both old format (studentId + examId) and new format (classId + examType + studentId)
     let reportCardData: any;
 
@@ -1956,6 +2058,10 @@ export const generateReportCardPDF = async (req: AuthRequest, res: Response) => 
       if (!student) {
         return res.status(404).json({ message: 'Student not found' });
       }
+
+      const classDescriptor = `${student.classEntity?.form || ''} ${student.classEntity?.name || ''}`.toLowerCase();
+      const upperFormKeywordsPdf = ['form 5', 'form five', 'form v', 'form 6', 'form six', 'form vi', 'lower six', 'upper six', 'a level', 'as level'];
+      const isUpperForm = upperFormKeywordsPdf.some(keyword => classDescriptor.includes(keyword));
 
       // Get all exams of the specified type for this class
       const exams = await examRepository.find({
@@ -2063,39 +2169,6 @@ export const generateReportCardPDF = async (req: AuthRequest, res: Response) => 
       
       // Note: We now include all subjects from the class, even if student has no marks
 
-      // Get settings
-      const settingsList = await settingsRepository.find({
-        order: { createdAt: 'DESC' },
-        take: 1
-      });
-      const settings = settingsList.length > 0 ? settingsList[0] : null;
-
-      const thresholds = settings?.gradeThresholds || {
-        excellent: 90,
-        veryGood: 80,
-        good: 70,
-        satisfactory: 60,
-        needsImprovement: 50
-      };
-
-      const gradeLabels = settings?.gradeLabels || {
-        excellent: 'Excellent',
-        veryGood: 'Very Good',
-        good: 'Good',
-        satisfactory: 'Satisfactory',
-        needsImprovement: 'Needs Improvement',
-        fail: 'Fail'
-      };
-
-      function getGrade(percentage: number): string {
-        if (percentage >= (thresholds.excellent || 90)) return gradeLabels.excellent || 'Excellent';
-        if (percentage >= (thresholds.veryGood || 80)) return gradeLabels.veryGood || 'Very Good';
-        if (percentage >= (thresholds.good || 70)) return gradeLabels.good || 'Good';
-        if (percentage >= (thresholds.satisfactory || 60)) return gradeLabels.satisfactory || 'Satisfactory';
-        if (percentage >= (thresholds.needsImprovement || 50)) return gradeLabels.needsImprovement || 'Needs Improvement';
-        return gradeLabels.fail || 'Fail';
-      }
-
       // Group marks by subject
       const subjectMarksMap: { [key: string]: { scores: number[]; maxScores: number[]; comments: string[] } } = {};
 
@@ -2127,6 +2200,8 @@ export const generateReportCardPDF = async (req: AuthRequest, res: Response) => 
           const totalScore = marksData.scores.reduce((a, b) => a + b, 0);
           const totalMaxScore = marksData.maxScores.reduce((a, b) => a + b, 0);
           const percentage = totalMaxScore > 0 ? (totalScore / totalMaxScore) * 100 : 0;
+          const gradeInfo = getGradeInfoPdf(percentage);
+          const points = isUpperForm ? (gradePointsPdf[gradeInfo.key] ?? 0) : undefined;
           return {
             subject: subjectName,
             subjectCode: subjectCode,
@@ -2135,7 +2210,8 @@ export const generateReportCardPDF = async (req: AuthRequest, res: Response) => 
             percentage: Math.round(percentage).toString(),
             classAverage: classAverage,
             comments: marksData.comments.join('; ') || undefined,
-            grade: getGrade(percentage)
+            grade: gradeInfo.label,
+            points
           };
         } else {
           // Student has no marks for this subject - show as N/A
@@ -2147,7 +2223,8 @@ export const generateReportCardPDF = async (req: AuthRequest, res: Response) => 
             percentage: '0',
             classAverage: classAverage,
             comments: 'Not taken',
-            grade: 'N/A'
+            grade: 'N/A',
+            points: undefined
           };
         }
       });
@@ -2156,6 +2233,9 @@ export const generateReportCardPDF = async (req: AuthRequest, res: Response) => 
       const subjectsWithMarks = subjectData.filter(sub => sub.grade !== 'N/A');
       const totalPercentage = subjectsWithMarks.reduce((sum, sub) => sum + parseFloat(sub.percentage), 0);
       const overallAverage = subjectsWithMarks.length > 0 ? totalPercentage / subjectsWithMarks.length : 0;
+      const totalPoints = isUpperForm
+        ? subjectsWithMarks.reduce((sum, sub) => sum + (sub.points || 0), 0)
+        : undefined;
 
       // Calculate class position
       const allClassMarks = await marksRepository.find({
@@ -2295,13 +2375,15 @@ export const generateReportCardPDF = async (req: AuthRequest, res: Response) => 
         })(),
         subjects: subjectData,
         overallAverage: overallAverage.toString(),
-        overallGrade: getGrade(overallAverage),
+        overallGrade: getGradeInfoPdf(overallAverage).label,
         classPosition: classPosition || 0,
         formPosition: formPosition || 0,
         totalStudents: totalStudents, // Add total number of students
         totalStudentsPerStream: totalStudentsPerStream || 0, // Add total number of students per stream
         totalAttendance: totalAttendance, // Total attendance days for the term
         presentAttendance: presentAttendance, // Present/excused attendance days
+        totalPoints: totalPoints,
+        isUpperForm: isUpperForm,
         remarks: {
           classTeacherRemarks: remarks?.classTeacherRemarks || null,
           headmasterRemarks: remarks?.headmasterRemarks || null
@@ -2318,6 +2400,10 @@ export const generateReportCardPDF = async (req: AuthRequest, res: Response) => 
       if (!student) {
         return res.status(404).json({ message: 'Student not found' });
       }
+
+      const oldFormatClassDescriptor = `${student.classEntity?.form || ''} ${student.classEntity?.name || ''}`.toLowerCase();
+      const upperFormKeywordsOld = ['form 5', 'form five', 'form v', 'form 6', 'form six', 'form vi', 'lower six', 'upper six', 'a level', 'as level'];
+      const isUpperForm = upperFormKeywordsOld.some(keyword => oldFormatClassDescriptor.includes(keyword));
 
       const marks = await marksRepository.find({
         where: { studentId: studentId as string, examId: examId as string },
@@ -2342,16 +2428,25 @@ export const generateReportCardPDF = async (req: AuthRequest, res: Response) => 
         const roundedMaxScore = Math.round(parseFloat(String(mark.maxScore)) || 100);
         const percentage = roundedMaxScore > 0 ? (roundedScore / roundedMaxScore) * 100 : 0;
         totalPercentage += percentage;
+        const gradeInfo = getGradeInfoPdf(percentage);
+        const points = isUpperForm ? (gradePointsPdf[gradeInfo.key] ?? 0) : undefined;
         return {
           subject: mark.subject.name,
+          subjectCode: mark.subject.code || '',
           score: roundedScore,
           maxScore: roundedMaxScore,
           percentage: Math.round(percentage).toString(),
-          comments: mark.comments
+          classAverage: undefined,
+          comments: mark.comments,
+          grade: gradeInfo.label,
+          points
         };
       });
 
       const overallAverage = marks.length > 0 ? totalPercentage / marks.length : 0;
+      const totalPoints = isUpperForm
+        ? subjectData.reduce((sum, sub) => sum + (sub.points || 0), 0)
+        : undefined;
 
       // Calculate class position
       const allClassMarks = await marksRepository.find({
@@ -2482,10 +2577,13 @@ export const generateReportCardPDF = async (req: AuthRequest, res: Response) => 
         exam: exam,
         subjects: subjectData,
         overallAverage: overallAverage.toString(),
+          overallGrade: getGradeInfoPdf(overallAverage).label,
         classPosition: classPosition || 0,
         formPosition: formPosition || 0,
         totalStudents: totalStudents, // Add total number of students
         totalStudentsPerStream: totalStudentsPerStream || 0, // Add total number of students per stream
+        totalPoints: totalPoints,
+        isUpperForm: isUpperForm,
         remarks: {
           classTeacherRemarks: remarks?.classTeacherRemarks || null,
           headmasterRemarks: remarks?.headmasterRemarks || null
@@ -2496,27 +2594,20 @@ export const generateReportCardPDF = async (req: AuthRequest, res: Response) => 
       return res.status(400).json({ message: 'Invalid parameters. Provide either (studentId + examId) or (classId + examType + studentId)' });
     }
 
-    // Get settings for PDF generation
-    const settingsList = await settingsRepository.find({
-      order: { createdAt: 'DESC' },
-      take: 1
-    });
-    const settings = settingsList.length > 0 ? settingsList[0] : null;
-
     // Generate PDF
     console.log('Generating PDF with data:', {
       student: reportCardData.student.name,
       examType: reportCardData.examType,
       subjectsCount: reportCardData.subjects.length,
       hasRemarks: !!(reportCardData.remarks?.classTeacherRemarks || reportCardData.remarks?.headmasterRemarks),
-      hasSettings: !!settings,
-      schoolName: settings?.schoolName,
-      schoolAddress: settings?.schoolAddress ? 'Present' : 'Missing',
-      schoolLogo: settings?.schoolLogo ? 'Present' : 'Missing',
-      academicYear: settings?.academicYear
+      hasSettings: !!activeSettings,
+      schoolName: activeSettings?.schoolName,
+      schoolAddress: activeSettings?.schoolAddress ? 'Present' : 'Missing',
+      schoolLogo: activeSettings?.schoolLogo ? 'Present' : 'Missing',
+      academicYear: activeSettings?.academicYear
     });
     
-    const pdfBuffer = await createReportCardPDF(reportCardData, settings);
+    const pdfBuffer = await createReportCardPDF(reportCardData, activeSettings);
     console.log('PDF generated, buffer size:', pdfBuffer.length);
 
     // Use student's full name for filename (sanitize for filesystem)

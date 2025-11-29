@@ -94,6 +94,30 @@
                 {{ getFieldError('code') }}
               </div>
             </div>
+
+            <!-- Subject Category -->
+            <div class="form-group">
+              <label for="category">
+                Syllabus Category <span class="required">*</span>
+                <span class="field-hint">Choose IGCSE or AS & A Level</span>
+              </label>
+              <div class="input-wrapper">
+                <select 
+                  id="category"
+                  [(ngModel)]="subject.category" 
+                  name="category" 
+                  required
+                  class="form-select">
+                  <option *ngFor="let cat of categories" [value]="cat.value">
+                    {{ cat.label }}
+                  </option>
+                </select>
+              </div>
+              <div class="field-hint">
+                <span class="hint-icon">📚</span>
+                Select the curriculum category for this subject
+              </div>
+            </div>
           </div>
 
           <!-- Description -->
@@ -167,6 +191,12 @@
             <div class="preview-item">
               <span class="preview-label">Subject Code:</span>
               <span class="preview-value code-badge">{{ subject.code || 'Not set' }}</span>
+            </div>
+            <div class="preview-item">
+              <span class="preview-label">Category:</span>
+              <span class="preview-value category-badge" [class.igcse]="subject.category === 'IGCSE'" [class.as-level]="subject.category === 'AS_A_LEVEL'">
+                {{ getCategoryLabel(subject.category) }}
+              </span>
             </div>
             <div class="preview-item" *ngIf="subject.description">
               <span class="preview-label">Description:</span>

@@ -1,4 +1,4 @@
-import { Entity, PrimaryGeneratedColumn, Column, OneToOne, JoinColumn, ManyToMany, JoinTable, Index } from 'typeorm';
+import { Entity, PrimaryGeneratedColumn, Column, OneToOne, JoinColumn, ManyToMany, ManyToOne, JoinTable, Index } from 'typeorm';
 import { User } from './User';
 import { Subject } from './Subject';
 import { Class } from './Class';
@@ -27,6 +27,12 @@ export class Teacher {
   @Column({ type: 'date', nullable: true })
   dateOfBirth: Date;
 
+  @Column({ nullable: true })
+  qualification: string;
+
+  @Column({ type: 'uuid', nullable: true })
+  teachingSubjectId: string;
+
   @Column({ default: true })
   isActive: boolean;
 
@@ -36,6 +42,10 @@ export class Teacher {
   @OneToOne(() => User, user => user.teacher)
   @JoinColumn({ name: 'userId' })
   user: User;
+
+  @ManyToOne(() => Subject, { nullable: true })
+  @JoinColumn({ name: 'teachingSubjectId' })
+  teachingSubject: Subject;
 
   @ManyToMany(() => Subject, subject => subject.teachers)
   @JoinTable()

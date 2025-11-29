@@ -98,6 +98,27 @@
     </div>
   </div>
 
+  <!-- Subject Selection -->
+  <div *ngIf="selectedTeacher && selectedClass" class="card subject-card">
+    <div class="card-header">
+      <h3>📚 Select Subject</h3>
+    </div>
+    <div class="subject-selection">
+      <select 
+        [(ngModel)]="selectedSubjectId" 
+        (change)="onSubjectChange()"
+        class="subject-select">
+        <option value="">-- Select Subject --</option>
+        <option *ngFor="let subject of availableSubjects" [value]="subject.id">
+          {{ subject.name }} ({{ subject.code }})
+        </option>
+      </select>
+    </div>
+    <div *ngIf="availableSubjects.length === 0" class="no-subjects">
+      <p>No subjects assigned to this teacher.</p>
+    </div>
+  </div>
+
   <!-- Loading State -->
   <div *ngIf="loading" class="loading-container">
     <div class="spinner"></div>
@@ -105,7 +126,7 @@
   </div>
 
   <!-- Record Book Table -->
-  <div *ngIf="!loading && selectedClass && students.length > 0" class="record-book-content">
+  <div *ngIf="!loading && selectedClass && selectedSubjectId && students.length > 0" class="record-book-content">
     <!-- Header Information -->
     <div class="record-book-header modern-header">
       <div class="header-grid">
@@ -259,6 +280,11 @@
   <!-- No Students Message -->
   <div *ngIf="!loading && selectedClass && students.length === 0" class="no-data">
     <p>No students enrolled in this class.</p>
+  </div>
+
+  <!-- No Subject Selected -->
+  <div *ngIf="!loading && selectedClass && !selectedSubjectId && availableSubjects.length > 0" class="no-data">
+    <p>Please select a subject to view the record book.</p>
   </div>
 
   <!-- No Class Selected -->

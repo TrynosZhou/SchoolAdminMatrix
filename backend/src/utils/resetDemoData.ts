@@ -236,14 +236,13 @@ export async function resetDemoDataForLogin() {
       gender: i % 2 === 0 ? 'Male' : 'Female',
       address: 'Demo Address',
       phoneNumber: `+2547000000${10 + i}`,
-      enrollmentDate: new Date('2024-01-01'),
       studentType: 'Day Scholar',
       usesTransport: false,
       usesDiningHall: false,
       isStaffChild: false,
       isActive: true,
-      userId: studentUser.id,
-      classId: i < 3 ? form1Class.id : form2Class.id
+      enrollmentStatus: 'Not Enrolled',
+      userId: studentUser.id
     };
     const student = studentRepository.create(studentData);
     await studentRepository.save(student);

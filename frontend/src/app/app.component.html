@@ -49,6 +49,12 @@
           <a routerLink="/students" routerLinkActive="active" class="sidebar-subitem" *ngIf="canAccessModule('students') || isAdmin() || isSuperAdmin()">
             <span class="sidebar-text">Student Listing</span>
           </a>
+          <a routerLink="/transfers/new" routerLinkActive="active" class="sidebar-subitem" *ngIf="isAdmin() || isSuperAdmin()">
+            <span class="sidebar-text">Transfer Student</span>
+          </a>
+          <a routerLink="/enrollments/unenrolled" routerLinkActive="active" class="sidebar-subitem" *ngIf="isAdmin() || isSuperAdmin()">
+            <span class="sidebar-text">Enrollment</span>
+          </a>
           <a routerLink="/admin/class-promotion" routerLinkActive="active" class="sidebar-subitem" *ngIf="isSuperAdmin()">
             <span class="sidebar-text">Class Promotion</span>
           </a>
@@ -68,6 +74,9 @@
           </a>
           <a routerLink="/teachers" routerLinkActive="active" class="sidebar-subitem">
             <span class="sidebar-text">Teachers</span>
+          </a>
+          <a routerLink="/teachers/assign-classes" routerLinkActive="active" class="sidebar-subitem" *ngIf="isAdmin() || isSuperAdmin()">
+            <span class="sidebar-text">Assign Classes</span>
           </a>
           <a routerLink="/admin/teacher-record-book" routerLinkActive="active" class="sidebar-subitem" *ngIf="isAdmin() || isSuperAdmin()">
             <span class="sidebar-text">Record Book</span>
@@ -162,6 +171,12 @@
           </a>
           <a routerLink="/attendance/reports" routerLinkActive="active" class="sidebar-subitem" *ngIf="canAccessModule('attendance') || isAdmin() || isSuperAdmin()">
             <span class="sidebar-text">Attendance Reports</span>
+          </a>
+          <a routerLink="/reports/dh-services" routerLinkActive="active" class="sidebar-subitem" *ngIf="isAdmin() || isSuperAdmin()">
+            <span class="sidebar-text">DH Services</span>
+          </a>
+          <a routerLink="/reports/transport-services" routerLinkActive="active" class="sidebar-subitem" *ngIf="isAdmin() || isSuperAdmin()">
+            <span class="sidebar-text">Transport Services</span>
           </a>
         </div>
       </div>

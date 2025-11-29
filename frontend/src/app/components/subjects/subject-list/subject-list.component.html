@@ -34,7 +34,7 @@
         class="search-input" 
         placeholder="Search subjects by code, name, or description..."
         [(ngModel)]="searchTerm"
-        (input)="filterSubjects()">
+        (input)="onSearchInput()">
       <button class="search-clear" *ngIf="searchTerm" (click)="clearSearch()" aria-label="Clear search">×</button>
     </div>
     <div class="filter-controls">
@@ -83,6 +83,7 @@
             <span>Subject Name</span>
             <span class="sort-icon" *ngIf="sortColumn === 'name'">{{ sortDirection === 'asc' ? '↑' : '↓' }}</span>
           </th>
+          <th>Category</th>
           <th (click)="sortByColumn('teachers')" class="sortable">
             <span>Teachers</span>
             <span class="sort-icon" *ngIf="sortColumn === 'teachers'">{{ sortDirection === 'asc' ? '↑' : '↓' }}</span>
@@ -102,6 +103,11 @@
           </td>
           <td class="subject-name">
             <span class="name-text">{{ subject.name }}</span>
+          </td>
+          <td class="subject-category">
+            <span class="category-badge" [class.igcse]="subject.category === 'IGCSE'" [class.as-level]="subject.category === 'AS_A_LEVEL'">
+              {{ getCategoryLabel(subject.category) }}
+            </span>
           </td>
           <td class="subject-count">
             <span class="count-badge teachers">
@@ -123,22 +129,24 @@
           </td>
           <td class="actions-cell">
             <div class="action-buttons">
-              <button 
-                class="btn-action btn-edit" 
-                (click)="editSubject(subject.id)" 
-                title="Edit Subject">
-                <span class="action-icon">✏️</span>
-                <span class="action-text">Edit</span>
-              </button>
               <span class="actions-label">Actions</span>
-              <button 
-                class="btn-action btn-delete" 
-                (click)="deleteSubject(subject.id, subject.name, subject.code)" 
-                [disabled]="loading"
-                title="Delete Subject">
-                <span class="action-icon">🗑️</span>
-                <span class="action-text">Delete</span>
-              </button>
+              <div class="action-buttons-row">
+                <button 
+                  class="btn-action btn-edit" 
+                  (click)="editSubject(subject.id)" 
+                  title="Edit Subject">
+                  <span class="action-icon">✏️</span>
+                  <span class="action-text">Edit</span>
+                </button>
+                <button 
+                  class="btn-action btn-delete" 
+                  (click)="deleteSubject(subject.id, subject.name, subject.code)" 
+                  [disabled]="loading"
+                  title="Delete Subject">
+                  <span class="action-icon">🗑️</span>
+                  <span class="action-text">Delete</span>
+                </button>
+              </div>
             </div>
           </td>
         </tr>
@@ -167,8 +175,26 @@
     <!-- Results Summary -->
     <div class="results-summary" *ngIf="filteredSubjects.length > 0">
       <span class="summary-text">
-        Showing {{ filteredSubjects.length }} of {{ subjects.length }} subject{{ subjects.length !== 1 ? 's' : '' }}
+        Showing {{ filteredSubjects.length }} of {{ pagination.total }} subject{{ pagination.total !== 1 ? 's' : '' }}
       </span>
+    </div>
+  </div>
+
+  <div class="pagination-bar" *ngIf="!loading && (pagination.totalPages > 1 || pagination.total > pagination.limit)">
+    <button class="btn btn-secondary" (click)="changePage(pagination.page - 1)" [disabled]="pagination.page === 1">
+      ‹ Previous
+    </button>
+    <span class="page-info">
+      Page {{ pagination.page }} of {{ pagination.totalPages }} • {{ pagination.total }} records
+    </span>
+    <button class="btn btn-secondary" (click)="changePage(pagination.page + 1)" [disabled]="pagination.page === pagination.totalPages">
+      Next ›
+    </button>
+    <div class="page-size-selector">
+      <label for="subjectPageSize">Rows per page:</label>
+      <select id="subjectPageSize" (change)="changePageSize($event.target.value)" [value]="pagination.limit">
+        <option *ngFor="let size of pageSizeOptions" [value]="size">{{ size }}</option>
+      </select>
     </div>
   </div>
 </div>

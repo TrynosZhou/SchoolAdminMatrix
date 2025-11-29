@@ -12,12 +12,25 @@ export class StudentService {
 
   constructor(private http: HttpClient) { }
 
-  getStudents(classId?: string): Observable<any> {
-    const options: any = {};
-    if (classId) {
-      options.params = { classId };
-    }
-    return this.http.get(`${this.apiUrl}/students`, options);
+  getStudents(options: {
+    classId?: string;
+    enrollmentStatus?: string;
+    page?: number;
+    limit?: number;
+    search?: string;
+    gender?: string;
+    studentType?: string;
+  } = {}): Observable<any> {
+    const params: any = {};
+    if (options.classId) params.classId = options.classId;
+    if (options.enrollmentStatus) params.enrollmentStatus = options.enrollmentStatus;
+    if (options.page) params.page = String(options.page);
+    if (options.limit) params.limit = String(options.limit);
+    if (options.search) params.search = options.search;
+    if (options.gender) params.gender = options.gender;
+    if (options.studentType) params.studentType = options.studentType;
+
+    return this.http.get(`${this.apiUrl}/students`, { params });
   }
 
   getStudentById(id: string): Observable<any> {
@@ -154,6 +167,14 @@ export class StudentService {
         return throwError(() => error);
       })
     );
+  }
+
+  getDHServicesReport(): Observable<any> {
+    return this.http.get(`${this.apiUrl}/students/reports/dh-services`);
+  }
+
+  getTransportServicesReport(): Observable<any> {
+    return this.http.get(`${this.apiUrl}/students/reports/transport-services`);
   }
 }
 

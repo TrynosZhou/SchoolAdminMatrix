@@ -13,6 +13,8 @@ import messageRoutes from './message.routes';
 import attendanceRoutes from './attendance.routes';
 import promotionRuleRoutes from './promotion-rule.routes';
 import recordBookRoutes from './recordBook.routes';
+import transferRoutes from './transfer.routes';
+import enrollmentRoutes from './enrollment.routes';
 
 const router = Router();
 
@@ -30,6 +32,9 @@ router.use('/messages', messageRoutes);
 router.use('/attendance', attendanceRoutes);
 router.use('/promotion-rules', promotionRuleRoutes);
 router.use('/record-book', recordBookRoutes);
+router.use('/transfers', transferRoutes);
+router.use('/student-transfers', transferRoutes); // Alias for /api/student-transfers
+router.use('/enrollments', enrollmentRoutes);
 
 export default router;
 

@@ -22,6 +22,14 @@ export class TeacherListComponent implements OnInit {
   selectedTeacher: any = null;
   error = '';
   success = '';
+  pagination = {
+    page: 1,
+    limit: 12,
+    total: 0,
+    totalPages: 1
+  };
+  pageSizeOptions = [12, 24, 48];
+  private searchDebounceTimer: any = null;
 
   constructor(
     private teacherService: TeacherService,
@@ -38,10 +46,22 @@ export class TeacherListComponent implements OnInit {
 
   loadTeachers() {
     this.loading = true;
-    this.teacherService.getTeachers().subscribe({
+    this.teacherService.getTeachers({
+      page: this.pagination.page,
+      limit: this.pagination.limit,
+      search: this.searchQuery || undefined
+    }).subscribe({
       next: (data: any) => {
-        this.teachers = data || [];
-        this.filteredTeachers = this.teachers;
+        if (Array.isArray(data)) {
+          this.teachers = data;
+          this.pagination.total = data.length;
+          this.pagination.totalPages = 1;
+        } else {
+          this.teachers = data?.data || [];
+          this.pagination.total = data?.total || this.teachers.length;
+          this.pagination.totalPages = data?.totalPages || 1;
+        }
+        this.applyLocalFilters();
         this.loading = false;
       },
       error: (err: any) => {
@@ -87,18 +107,11 @@ export class TeacherListComponent implements OnInit {
   }
 
   filterTeachers() {
-    let filtered = [...this.teachers];
+    this.applyLocalFilters();
+  }
 
-    // Search filter
-    if (this.searchQuery.trim()) {
-      const query = this.searchQuery.toLowerCase().trim();
-      filtered = filtered.filter(teacher => {
-        const fullName = `${teacher.firstName} ${teacher.lastName}`.toLowerCase();
-        const teacherId = (teacher.teacherId || '').toLowerCase();
-        const phone = (teacher.phoneNumber || '').toLowerCase();
-        return fullName.includes(query) || teacherId.includes(query) || phone.includes(query);
-      });
-    }
+  private applyLocalFilters() {
+    let filtered = [...this.teachers];
 
     // Subject filter
     if (this.selectedSubjectFilter) {
@@ -121,7 +134,8 @@ export class TeacherListComponent implements OnInit {
     this.searchQuery = '';
     this.selectedSubjectFilter = '';
     this.selectedClassFilter = '';
-    this.filterTeachers();
+    this.pagination.page = 1;
+    this.loadTeachers();
   }
 
   hasActiveFilters(): boolean {
@@ -201,5 +215,31 @@ export class TeacherListComponent implements OnInit {
         setTimeout(() => this.error = '', 5000);
       }
     });
+  }
+
+  onSearchInput() {
+    if (this.searchDebounceTimer) {
+      clearTimeout(this.searchDebounceTimer);
+    }
+    this.searchDebounceTimer = setTimeout(() => {
+      this.pagination.page = 1;
+      this.loadTeachers();
+    }, 400);
+  }
+
+  changePage(page: number) {
+    if (page < 1 || page > this.pagination.totalPages || page === this.pagination.page) {
+      return;
+    }
+    this.pagination.page = page;
+    this.loadTeachers();
+  }
+
+  changePageSize(limit: string | number) {
+    const parsedLimit = typeof limit === 'string' ? parseInt(limit, 10) : limit;
+    if (!parsedLimit || parsedLimit === this.pagination.limit) return;
+    this.pagination.limit = parsedLimit;
+    this.pagination.page = 1;
+    this.loadTeachers();
   }
 }

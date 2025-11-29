@@ -75,7 +75,7 @@ export class MarkAttendanceComponent implements OnInit {
     this.error = '';
     
     // Load students for the selected class
-    this.studentService.getStudents(this.selectedClassId).subscribe({
+    this.studentService.getStudents({ classId: this.selectedClassId }).subscribe({
       next: (data: any) => {
         this.students = data.filter((s: any) => s.isActive);
         this.initializeAttendanceData();

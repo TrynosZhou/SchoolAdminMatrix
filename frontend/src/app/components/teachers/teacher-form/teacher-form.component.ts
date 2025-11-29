@@ -2,7 +2,8 @@ import { Component, OnInit } from '@angular/core';
 import { ActivatedRoute, Router } from '@angular/router';
 import { TeacherService } from '../../../services/teacher.service';
 import { SubjectService } from '../../../services/subject.service';
-import { ClassService } from '../../../services/class.service';
+import { SubjectUtilsService } from '../../../services/subject-utils.service';
+import { NgModel } from '@angular/forms';
 
 @Component({
   selector: 'app-teacher-form',
@@ -16,25 +17,24 @@ export class TeacherFormComponent implements OnInit {
     phoneNumber: '',
     address: '',
     dateOfBirth: '',
-    subjectIds: [],
-    classIds: []
+    qualification: '',
+    subjectIds: []
   };
-  subjects: any[] = [];
-  classes: any[] = [];
-  filteredSubjects: any[] = [];
-  filteredClasses: any[] = [];
+  availableSubjects: any[] = [];
   subjectSearchQuery = '';
-  classSearchQuery = '';
+  filteredSubjects: any[] = [];
   isEdit = false;
   error = '';
   success = '';
   submitting = false;
   maxDate = '';
+  readonly phoneValidationMessage = 'Please enter a valid contact number, e.g. +263771234567.';
+  private readonly phoneRegex = /^\+?\d{9,15}$/;
 
   constructor(
     private teacherService: TeacherService,
     private subjectService: SubjectService,
-    private classService: ClassService,
+    private subjectUtils: SubjectUtilsService,
     private route: ActivatedRoute,
     public router: Router
   ) {
@@ -45,7 +45,6 @@ export class TeacherFormComponent implements OnInit {
 
   ngOnInit() {
     this.loadSubjects();
-    this.loadClasses();
     const id = this.route.snapshot.params['id'];
     if (id) {
       this.isEdit = true;
@@ -56,29 +55,59 @@ export class TeacherFormComponent implements OnInit {
   loadSubjects() {
     this.subjectService.getSubjects().subscribe({
       next: (data: any) => {
-        this.subjects = data;
-        this.filteredSubjects = data;
+        // Get unique subject names (group by name to avoid duplicates)
+        const subjectMap = new Map<string, any>();
+        (data || []).forEach((subject: any) => {
+          if (!subjectMap.has(subject.name)) {
+            subjectMap.set(subject.name, {
+              id: subject.id,
+              name: subject.name
+            });
+          }
+        });
+        this.availableSubjects = Array.from(subjectMap.values()).sort((a, b) => 
+          a.name.localeCompare(b.name)
+        );
+        this.filteredSubjects = [...this.availableSubjects];
+        this.error = ''; // Clear any previous errors
       },
       error: (err: any) => {
         console.error('Error loading subjects:', err);
-        this.error = 'Failed to load subjects';
-        setTimeout(() => this.error = '', 5000);
+        // Only show error if it's not a connection refused (might be temporary)
+        if (err.status !== 0 && err.status !== undefined) {
+          this.error = 'Failed to load subjects. Please refresh the page.';
+        } else {
+          // Connection refused - likely server restarting, retry after a delay
+          setTimeout(() => {
+            this.loadSubjects();
+          }, 2000);
+        }
       }
     });
   }
 
-  loadClasses() {
-    this.classService.getClasses().subscribe({
-      next: (data: any) => {
-        this.classes = data;
-        this.filteredClasses = data;
-      },
-      error: (err: any) => {
-        console.error('Error loading classes:', err);
-        this.error = 'Failed to load classes';
-        setTimeout(() => this.error = '', 5000);
-      }
-    });
+  filterSubjects() {
+    if (!this.subjectSearchQuery.trim()) {
+      this.filteredSubjects = [...this.availableSubjects];
+      return;
+    }
+    const query = this.subjectSearchQuery.toLowerCase();
+    this.filteredSubjects = this.availableSubjects.filter(subject =>
+      subject.name.toLowerCase().includes(query)
+    );
+  }
+
+  toggleSubject(subjectId: string) {
+    const index = this.teacher.subjectIds.indexOf(subjectId);
+    if (index > -1) {
+      this.teacher.subjectIds.splice(index, 1);
+    } else {
+      this.teacher.subjectIds.push(subjectId);
+    }
+  }
+
+  isSubjectSelected(subjectId: string): boolean {
+    return this.teacher.subjectIds.includes(subjectId);
   }
 
   loadTeacher(id: string) {
@@ -88,7 +117,7 @@ export class TeacherFormComponent implements OnInit {
           ...data,
           dateOfBirth: data.dateOfBirth?.split('T')[0],
           subjectIds: data.subjects?.map((s: any) => s.id) || [],
-          classIds: data.classes?.map((c: any) => c.id) || []
+          phoneNumber: data.phoneNumber || ''
         };
       },
       error: (err: any) => {
@@ -96,28 +125,6 @@ export class TeacherFormComponent implements OnInit {
         setTimeout(() => this.error = '', 5000);
       }
     });
-  }
-
-  filterSubjects() {
-    if (!this.subjectSearchQuery.trim()) {
-      this.filteredSubjects = this.subjects;
-      return;
-    }
-    const query = this.subjectSearchQuery.toLowerCase();
-    this.filteredSubjects = this.subjects.filter(subject =>
-      subject.name.toLowerCase().includes(query)
-    );
-  }
-
-  filterClasses() {
-    if (!this.classSearchQuery.trim()) {
-      this.filteredClasses = this.classes;
-      return;
-    }
-    const query = this.classSearchQuery.toLowerCase();
-    this.filteredClasses = this.classes.filter(cls =>
-      cls.name.toLowerCase().includes(query)
-    );
   }
 
   private calculateAge(dateString: string): number {
@@ -134,6 +141,26 @@ export class TeacherFormComponent implements OnInit {
     return age;
   }
 
+  getPhoneNumberError(control: NgModel): string {
+    if (!control || !control.errors) {
+      return this.phoneValidationMessage;
+    }
+    if (control.errors['required']) {
+      return 'Contact number is required.';
+    }
+    if (control.errors['minlength'] || control.errors['maxlength']) {
+      return 'Contact number must be between 9 and 15 digits.';
+    }
+    if (control.errors['pattern']) {
+      return this.phoneValidationMessage;
+    }
+    return this.phoneValidationMessage;
+  }
+
+  private isPhoneNumberValid(value: string): boolean {
+    return this.phoneRegex.test(value.trim());
+  }
+
   onSubmit() {
     this.error = '';
     this.success = '';
@@ -146,6 +173,13 @@ export class TeacherFormComponent implements OnInit {
       return;
     }
 
+    if (!this.teacher.phoneNumber || !this.isPhoneNumberValid(this.teacher.phoneNumber)) {
+      this.error = this.phoneValidationMessage;
+      this.submitting = false;
+      return;
+    }
+    this.teacher.phoneNumber = this.teacher.phoneNumber.trim();
+
     const age = this.calculateAge(this.teacher.dateOfBirth);
     if (age < 20 || age > 65) {
       this.error = 'Teacher age must be between 20 and 65 years';
@@ -157,6 +191,7 @@ export class TeacherFormComponent implements OnInit {
       // Don't send teacherId in update (it cannot be changed)
       const updateData = { ...this.teacher };
       delete updateData.teacherId;
+      delete updateData.id;
       
       this.teacherService.updateTeacher(this.teacher.id, updateData).subscribe({
         next: () => {
@@ -174,6 +209,7 @@ export class TeacherFormComponent implements OnInit {
       // For new teachers, don't send teacherId (it will be auto-generated)
       const teacherData = { ...this.teacher };
       delete teacherData.teacherId; // Remove teacherId, it will be auto-generated
+      delete teacherData.id;
       
       this.teacherService.createTeacher(teacherData).subscribe({
         next: (response: any) => {
@@ -190,21 +226,4 @@ export class TeacherFormComponent implements OnInit {
     }
   }
 
-  toggleSubject(subjectId: string) {
-    const index = this.teacher.subjectIds.indexOf(subjectId);
-    if (index > -1) {
-      this.teacher.subjectIds.splice(index, 1);
-    } else {
-      this.teacher.subjectIds.push(subjectId);
-    }
-  }
-
-  toggleClass(classId: string) {
-    const index = this.teacher.classIds.indexOf(classId);
-    if (index > -1) {
-      this.teacher.classIds.splice(index, 1);
-    } else {
-      this.teacher.classIds.push(classId);
-    }
-  }
 }

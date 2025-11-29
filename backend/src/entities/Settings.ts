@@ -9,6 +9,10 @@ export class Settings {
   @Column({ type: 'varchar', default: 'JPS' })
   studentIdPrefix: string;
 
+  // Teacher ID Settings
+  @Column({ type: 'varchar', default: 'JPST' })
+  teacherIdPrefix: string;
+
   // Fees Settings (JSON)
   @Column({ type: 'json', nullable: true })
   feesSettings: {
@@ -44,6 +48,18 @@ export class Settings {
     needsImprovement?: string; // e.g., "Aspiring"
     basic?: string; // e.g., "Basic"
     fail?: string; // e.g., "Unclassified"
+  } | null;
+
+  // Grade Points (JSON) - Points awarded per grade (used for Forms 5 & 6)
+  @Column({ type: 'json', nullable: true })
+  gradePoints: {
+    excellent?: number;
+    veryGood?: number;
+    good?: number;
+    satisfactory?: number;
+    needsImprovement?: number;
+    basic?: number;
+    fail?: number;
   } | null;
 
   // School Information

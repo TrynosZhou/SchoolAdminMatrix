@@ -2,32 +2,130 @@ import { Router } from 'express';
 import { authenticate, authorize, AuthRequest } from '../middleware/auth';
 import { UserRole } from '../entities/User';
 import { AppDataSource } from '../config/database';
-import { Subject } from '../entities/Subject';
+import { Subject, SubjectCategory } from '../entities/Subject';
 import { isDemoUser } from '../utils/demoDataFilter';
 import { Teacher } from '../entities/Teacher';
 import { In } from 'typeorm';
 import { ensureDemoDataAvailable } from '../utils/demoDataEnsurer';
+import { buildPaginationResponse, parsePaginationParams } from '../utils/pagination';
 
 const router = Router();
+const SUBJECT_CATEGORIES: SubjectCategory[] = ['IGCSE', 'AS_A_LEVEL'];
 
 router.get('/', authenticate, async (req: AuthRequest, res) => {
   try {
+    if (!AppDataSource.isInitialized) {
+      await AppDataSource.initialize();
+    }
+
     const subjectRepository = AppDataSource.getRepository(Subject);
     
     if (isDemoUser(req)) {
       await ensureDemoDataAvailable();
     }
 
-    // For demo users, show all subjects and all teachers (relaxed restriction)
-    const subjects = await subjectRepository.find({
-      relations: ['teachers', 'teachers.user', 'classes']
+    // Try to load with relations, but handle errors gracefully
+    let subjects;
+    try {
+      subjects = await subjectRepository.find({
+        relations: ['teachers', 'teachers.user', 'classes']
+      });
+    } catch (relationError: any) {
+      console.error('[getSubjects] Error loading with relations:', relationError.message);
+      console.error('[getSubjects] Error code:', relationError.code);
+      console.error('[getSubjects] Error stack:', relationError.stack);
+      
+      // Check if it's a column error (missing category column)
+      const isColumnError = relationError.message?.includes('column') ||
+                           relationError.message?.includes('does not exist') ||
+                           relationError.code === '42703'; // PostgreSQL: undefined column
+      
+      if (isColumnError) {
+        console.log('[getSubjects] Column error detected, trying to fix schema...');
+        // Try to add the category column if it doesn't exist
+        try {
+          const queryRunner = AppDataSource.createQueryRunner();
+          await queryRunner.connect();
+          const hasColumn = await queryRunner.hasColumn('subjects', 'category');
+          if (!hasColumn) {
+            console.log('[getSubjects] Adding category column to subjects table...');
+            await queryRunner.query(
+              `ALTER TABLE "subjects" ADD COLUMN "category" character varying NOT NULL DEFAULT 'IGCSE'`
+            );
+            console.log('[getSubjects] Category column added successfully');
+          }
+          await queryRunner.release();
+          
+          // Retry the query
+          subjects = await subjectRepository.find({
+            relations: ['teachers', 'teachers.user', 'classes']
+          });
+        } catch (fixError: any) {
+          console.error('[getSubjects] Error fixing schema:', fixError.message);
+          // Fallback: load without relations
+          try {
+            subjects = await subjectRepository.find();
+            subjects = subjects.map((s: any) => ({
+              ...s,
+              category: s.category || 'IGCSE',
+              teachers: [],
+              classes: []
+            }));
+          } catch (fallbackError: any) {
+            console.error('[getSubjects] Fallback query also failed:', fallbackError.message);
+            throw relationError; // Throw original error
+          }
+        }
+      } else {
+        // For other errors, try fallback before rethrowing
+        console.log('[getSubjects] Non-column error, trying fallback...');
+        try {
+          subjects = await subjectRepository.find();
+          subjects = subjects.map((s: any) => ({
+            ...s,
+            teachers: [],
+            classes: []
+          }));
+        } catch (fallbackError: any) {
+          console.error('[getSubjects] Fallback failed, rethrowing original error');
+          throw relationError;
+        }
+      }
+    }
+    
+    const pagination = parsePaginationParams(req.query);
+    const searchQuery = typeof req.query.search === 'string' ? req.query.search.trim().toLowerCase() : '';
+
+    // Ensure all subjects have category field
+    let normalizedSubjects = (subjects || []).map((s: any) => ({
+      ...s,
+      category: s.category || 'IGCSE'
+    }));
+
+    if (searchQuery) {
+      normalizedSubjects = normalizedSubjects.filter((subject: any) => {
+        const name = (subject.name || '').toLowerCase();
+        const code = (subject.code || '').toLowerCase();
+        const description = (subject.description || '').toLowerCase();
+        return name.includes(searchQuery) || code.includes(searchQuery) || description.includes(searchQuery);
+      });
+    }
+    
+    if (pagination.isPaginated) {
+      const total = normalizedSubjects.length;
+      const paged = normalizedSubjects.slice(pagination.skip, pagination.skip + pagination.limit);
+      return res.json(buildPaginationResponse(paged, pagination.page, pagination.limit, total));
+    }
+    
+    res.json(normalizedSubjects);
+  } catch (error: any) {
+    console.error('[getSubjects] Final error:', error);
+    console.error('[getSubjects] Error stack:', error.stack);
+    res.status(500).json({ 
+      message: 'Server error', 
+      error: error.message || 'Unknown error',
+      code: error.code
     });
-    
-    // Removed demo filtering - demo users can now see all teachers in subjects
-    
-    res.json(subjects);
-  } catch (error) {
-    res.status(500).json({ message: 'Server error', error });
   }
 });
 
@@ -52,7 +150,7 @@ router.get('/:id', authenticate, async (req, res) => {
 
 router.post('/', authenticate, authorize(UserRole.SUPERADMIN, UserRole.ADMIN, UserRole.DEMO_USER), async (req, res) => {
   try {
-    const { name, code, description } = req.body;
+    const { name, code, description, category } = req.body;
     const subjectRepository = AppDataSource.getRepository(Subject);
     
     // Validate required fields
@@ -64,13 +162,25 @@ router.post('/', authenticate, authorize(UserRole.SUPERADMIN, UserRole.ADMIN, Us
       return res.status(400).json({ message: 'Subject code is required and must be unique' });
     }
 
+    const normalizedCategory = (category || 'IGCSE').toUpperCase();
+    if (!SUBJECT_CATEGORIES.includes(normalizedCategory as SubjectCategory)) {
+      return res.status(400).json({ message: 'Invalid subject category. Allowed values: IGCSE, AS & A Level' });
+    }
+
+    const normalizedCode = code.trim().toUpperCase();
+
     // Check if code is unique
-    const existingSubject = await subjectRepository.findOne({ where: { code: code.trim() } });
+    const existingSubject = await subjectRepository.findOne({ where: { code: normalizedCode } });
     if (existingSubject) {
       return res.status(400).json({ message: 'Subject code already exists' });
     }
 
-    const subject = subjectRepository.create({ name: name.trim(), code: code.trim(), description });
+    const subject = subjectRepository.create({ 
+      name: name.trim(), 
+      code: normalizedCode, 
+      description,
+      category: normalizedCategory as SubjectCategory
+    });
     await subjectRepository.save(subject);
     res.status(201).json({ message: 'Subject created successfully', subject });
   } catch (error: any) {
@@ -84,7 +194,7 @@ router.post('/', authenticate, authorize(UserRole.SUPERADMIN, UserRole.ADMIN, Us
 router.put('/:id', authenticate, authorize(UserRole.SUPERADMIN, UserRole.ADMIN, UserRole.DEMO_USER), async (req, res) => {
   try {
     const { id } = req.params;
-    const { name, code, description, isActive } = req.body;
+    const { name, code, description, isActive, category } = req.body;
     const subjectRepository = AppDataSource.getRepository(Subject);
 
     const subject = await subjectRepository.findOne({ where: { id } });
@@ -112,6 +222,13 @@ router.put('/:id', authenticate, authorize(UserRole.SUPERADMIN, UserRole.ADMIN, 
     if (name !== undefined) subject.name = name;
     if (description !== undefined) subject.description = description;
     if (isActive !== undefined) subject.isActive = isActive;
+    if (category !== undefined) {
+      const normalizedCategory = category.toUpperCase();
+      if (!SUBJECT_CATEGORIES.includes(normalizedCategory as SubjectCategory)) {
+        return res.status(400).json({ message: 'Invalid subject category. Allowed values: IGCSE, AS & A Level' });
+      }
+      subject.category = normalizedCategory as SubjectCategory;
+    }
 
     await subjectRepository.save(subject);
     res.json({ message: 'Subject updated successfully', subject });

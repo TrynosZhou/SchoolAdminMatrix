@@ -73,6 +73,14 @@ export class InvoiceListComponent implements OnInit {
   updatedBalanceAfterPayment: number | null = null; // Track balance after payment
   loadingReceipt = false;
   Math = Math; // Expose Math to template for calculations
+  pagination = {
+    page: 1,
+    limit: 10,
+    total: 0,
+    totalPages: 1
+  };
+  pageSizeOptions = [10, 20, 50];
+  private searchDebounceTimer: any = null;
   
   getFollowingTerm(currentTerm: string): string {
     if (!currentTerm) return '';
@@ -163,9 +171,29 @@ export class InvoiceListComponent implements OnInit {
 
   loadInvoices() {
     this.loading = true;
-    this.financeService.getInvoices().subscribe({
-      next: (data: any[]) => {
-        this.invoices = (data || []).sort((a, b) => {
+    const statusParam = this.selectedStatusFilter && this.selectedStatusFilter !== 'all'
+      ? this.selectedStatusFilter
+      : undefined;
+    this.financeService.getInvoices(
+      undefined,
+      statusParam,
+      this.pagination.page,
+      this.pagination.limit,
+      this.invoiceSearchQuery || undefined
+    ).subscribe({
+      next: (data: any) => {
+        let invoicesResponse: any[] = [];
+        if (Array.isArray(data)) {
+          invoicesResponse = data;
+          this.pagination.total = data.length;
+          this.pagination.totalPages = 1;
+        } else {
+          invoicesResponse = data?.data || [];
+          this.pagination.total = data?.total || invoicesResponse.length;
+          this.pagination.totalPages = data?.totalPages || 1;
+        }
+
+        this.invoices = invoicesResponse.sort((a, b) => {
           const dateA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
           const dateB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
           return dateB - dateA;
@@ -260,8 +288,8 @@ export class InvoiceListComponent implements OnInit {
     this.selectedStatusFilter = '';
     this.selectedTermFilter = '';
     this.selectedStudent = '';
-    // After clearing filters, show all invoices
-    this.filteredInvoices = [...this.invoices];
+    this.pagination.page = 1;
+    this.loadInvoices();
   }
 
   hasActiveInvoiceFilters(): boolean {
@@ -693,6 +721,34 @@ export class InvoiceListComponent implements OnInit {
     this.currentReceiptFilename = '';
     this.currentReceiptNumber = '';
     // Don't clear lastPaidInvoiceId so the button remains enabled
+  }
+
+  onSearchInput() {
+    if (this.searchDebounceTimer) {
+      clearTimeout(this.searchDebounceTimer);
+    }
+    this.searchDebounceTimer = setTimeout(() => {
+      this.pagination.page = 1;
+      this.loadInvoices();
+    }, 400);
+  }
+
+  changePage(page: number) {
+    if (page < 1 || page > this.pagination.totalPages || page === this.pagination.page) {
+      return;
+    }
+    this.pagination.page = page;
+    this.loadInvoices();
+  }
+
+  changePageSize(limit: string | number) {
+    const parsedLimit = typeof limit === 'string' ? parseInt(limit, 10) : limit;
+    if (!parsedLimit || parsedLimit === this.pagination.limit) {
+      return;
+    }
+    this.pagination.limit = parsedLimit;
+    this.pagination.page = 1;
+    this.loadInvoices();
   }
 
   viewStudentReceipt() {

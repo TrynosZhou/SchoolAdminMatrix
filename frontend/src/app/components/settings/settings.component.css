@@ -1,3 +1,76 @@
+.grade-points-table-wrapper {
+  border: 1px solid #e0e0e0;
+  border-radius: 10px;
+  overflow: hidden;
+  background: #fff;
+}
+
+.grade-points-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.grade-points-table thead {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: #fff;
+}
+
+.grade-points-table th,
+.grade-points-table td {
+  padding: 14px 18px;
+  text-align: left;
+  border-bottom: 1px solid #f0f0f0;
+}
+
+.grade-points-table tr:last-child td {
+  border-bottom: none;
+}
+
+.grade-column {
+  width: 60%;
+}
+
+.grade-label {
+  font-weight: 700;
+  font-size: 16px;
+  color: #1f2937;
+}
+
+.grade-notes {
+  display: block;
+  margin-top: 4px;
+  color: #6b7280;
+  font-size: 12px;
+}
+
+.points-column {
+  width: 40%;
+  text-align: center;
+}
+
+.points-input {
+  width: 100px;
+  text-align: center;
+  padding: 8px 10px;
+  border: 2px solid #d1d5db;
+  border-radius: 8px;
+  font-weight: 600;
+  font-size: 16px;
+  color: #111827;
+}
+
+.points-input:focus {
+  outline: none;
+  border-color: #667eea;
+  box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.2);
+}
+
+.table-helper {
+  display: block;
+  margin-top: 12px;
+  font-size: 13px;
+  color: #6b7280;
+}
 .form-section {
   margin-bottom: 30px;
   padding: 20px;

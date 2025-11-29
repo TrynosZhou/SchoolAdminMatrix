@@ -11,8 +11,12 @@ export class TeacherService {
 
   constructor(private http: HttpClient) { }
 
-  getTeachers(): Observable<any> {
-    return this.http.get(`${this.apiUrl}/teachers`);
+  getTeachers(options: { page?: number; limit?: number; search?: string } = {}): Observable<any> {
+    const params: any = {};
+    if (options.page) params.page = String(options.page);
+    if (options.limit) params.limit = String(options.limit);
+    if (options.search) params.search = options.search;
+    return this.http.get(`${this.apiUrl}/teachers`, { params });
   }
 
   getCurrentTeacher(): Observable<any> {
@@ -33,6 +37,14 @@ export class TeacherService {
 
   getTeacherClasses(id: string): Observable<any> {
     return this.http.get(`${this.apiUrl}/teachers/${id}/classes`);
+  }
+
+  assignClassesToTeacher(id: string, classIds: string[]): Observable<any> {
+    return this.http.put(`${this.apiUrl}/teachers/${id}/classes`, { classIds });
+  }
+
+  getTeacherLoad(id: string): Observable<any> {
+    return this.http.get(`${this.apiUrl}/teachers/${id}/load`);
   }
 
   createTeacherAccount(teacherId: string): Observable<any> {

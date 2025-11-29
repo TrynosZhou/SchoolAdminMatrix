@@ -29,6 +29,7 @@ interface ReportCardData {
     classAverage?: number;
     grade?: string;
     comments?: string;
+    points?: number;
   }>;
   overallAverage: string;
   overallGrade?: string;
@@ -38,6 +39,8 @@ interface ReportCardData {
   totalStudentsPerStream?: number;
   totalAttendance?: number;
   presentAttendance?: number;
+  totalPoints?: number;
+  isUpperForm?: boolean;
   remarks?: {
     classTeacherRemarks?: string | null;
     headmasterRemarks?: string | null;
@@ -386,42 +389,50 @@ export function createReportCardPDF(
       doc.fontSize(10).font('Helvetica-Bold').text('Subject Performance:', 50, yPos);
       yPos += 16;
 
-      // Define table dimensions - adjusted to prevent overlap
       const tableStartX = 50;
       const tableEndX = 545;
-      const rowHeight = 18; // Reduced to fit more rows on one page
-      const colWidths = {
-        subject: 70,        // Reduced from 90
-        subjectCode: 55,    // Reduced from 70
-        markObtained: 75,   // Increased to fit "Mark Obtained"
-        possibleMark: 75,   // Increased to fit "Possible Mark"
-        classAverage: 55,   // Reduced from 70
-        grade: 80,          // Increased from 60 to fit longer grade names
-        comments: 180
-      };
-      
-      // Calculate total width and adjust if needed
-      const totalTableWidth = colWidths.subject + colWidths.subjectCode + colWidths.markObtained + colWidths.possibleMark + 
-                              colWidths.classAverage + colWidths.grade + colWidths.comments + 30; // 30 for padding
-      const availableWidth = tableEndX - tableStartX;
-      
-      if (totalTableWidth > availableWidth) {
-        // Calculate available space for comments (reserve space for other columns + padding)
-        const reservedWidth = colWidths.subject + colWidths.subjectCode + colWidths.markObtained + colWidths.possibleMark + 
-                              colWidths.classAverage + colWidths.grade + 30;
-        colWidths.comments = Math.max(120, availableWidth - reservedWidth); // Minimum 120 for comments
-      }
-      const colPositions = {
-        subject: tableStartX + 5,
-        subjectCode: tableStartX + colWidths.subject + 5,
-        markObtained: tableStartX + colWidths.subject + colWidths.subjectCode + 5,
-        possibleMark: tableStartX + colWidths.subject + colWidths.subjectCode + colWidths.markObtained + 5,
-        classAverage: tableStartX + colWidths.subject + colWidths.subjectCode + colWidths.markObtained + colWidths.possibleMark + 5,
-        grade: tableStartX + colWidths.subject + colWidths.subjectCode + colWidths.markObtained + colWidths.possibleMark + colWidths.classAverage + 5,
-        comments: tableStartX + colWidths.subject + colWidths.subjectCode + colWidths.markObtained + colWidths.possibleMark + colWidths.classAverage + colWidths.grade + 5
-      };
+      const rowHeight = 18;
+      const showPointsColumn = !!reportCard.isUpperForm;
 
-      // Table Header with background color
+      type ColumnDef = { key: string; label: string; width: number; align?: 'left' | 'center' | 'right' };
+      const columnDefs: ColumnDef[] = [
+        { key: 'subject', label: 'Subject', width: 90, align: 'left' },
+        { key: 'subjectCode', label: 'Subject Code', width: 60, align: 'center' },
+        { key: 'markObtained', label: 'Mark Obtained', width: 80, align: 'center' },
+        { key: 'classAverage', label: 'Class Avg', width: 60, align: 'center' },
+        { key: 'grade', label: 'Grade', width: showPointsColumn ? 70 : 80, align: 'center' }
+      ];
+
+      if (showPointsColumn) {
+        columnDefs.push({ key: 'points', label: 'Points', width: 55, align: 'center' });
+      }
+
+      columnDefs.push({
+        key: 'comments',
+        label: 'Comments',
+        width: showPointsColumn ? 200 : 240,
+        align: 'left'
+      });
+
+      const availableWidth = tableEndX - tableStartX;
+      const currentWidth = columnDefs.reduce((sum, col) => sum + col.width, 0);
+      if (currentWidth > availableWidth) {
+        const overflow = currentWidth - availableWidth;
+        const commentsCol = columnDefs.find(col => col.key === 'comments');
+        if (commentsCol) {
+          commentsCol.width = Math.max(120, commentsCol.width - overflow);
+        }
+      }
+
+      const colPositions: Record<string, number> = {};
+      const colBoundaries: number[] = [tableStartX];
+      let runningX = tableStartX;
+      columnDefs.forEach(col => {
+        colPositions[col.key] = runningX + 5;
+        runningX += col.width;
+        colBoundaries.push(runningX);
+      });
+
       const headerY = yPos;
       doc.rect(tableStartX, headerY, tableEndX - tableStartX, rowHeight)
         .fillColor('#4A90E2')
@@ -430,36 +441,14 @@ export function createReportCardPDF(
         .strokeColor('#000000')
         .lineWidth(1);
 
-      // Header text
       doc.fontSize(9).font('Helvetica-Bold').fillColor('#FFFFFF');
-      doc.text('Subject', colPositions.subject, headerY + 8, { width: colWidths.subject - 10 });
-      doc.text('Subject Code', colPositions.subjectCode, headerY + 8, { width: colWidths.subjectCode - 10 });
-      // Ensure full text displays for Mark Obtained and Possible Mark
-      doc.text('Mark Obtained', colPositions.markObtained, headerY + 8, { width: colWidths.markObtained - 5 });
-      doc.text('Possible Mark', colPositions.possibleMark, headerY + 8, { width: colWidths.possibleMark - 5 });
-      doc.text('Class Avg', colPositions.classAverage, headerY + 8, { width: colWidths.classAverage - 10 });
-      doc.text('Grade', colPositions.grade, headerY + 8, { width: colWidths.grade - 10 });
-      doc.text('Comments', colPositions.comments, headerY + 8, { width: colWidths.comments - 10 });
+      columnDefs.forEach(col => {
+        doc.text(col.label, colPositions[col.key], headerY + 8, { width: col.width - 10, align: col.align || 'left' });
+      });
 
-      // Calculate column boundaries for proper alignment
-      const colBoundaries = [
-        tableStartX,
-        tableStartX + colWidths.subject,
-        tableStartX + colWidths.subject + colWidths.subjectCode,
-        tableStartX + colWidths.subject + colWidths.subjectCode + colWidths.markObtained,
-        tableStartX + colWidths.subject + colWidths.subjectCode + colWidths.markObtained + colWidths.possibleMark,
-        tableStartX + colWidths.subject + colWidths.subjectCode + colWidths.markObtained + colWidths.possibleMark + colWidths.classAverage,
-        tableStartX + colWidths.subject + colWidths.subjectCode + colWidths.markObtained + colWidths.possibleMark + colWidths.classAverage + colWidths.grade,
-        tableEndX
-      ];
-
-      // Draw header borders
       doc.strokeColor('#000000').lineWidth(1);
-      // Top border
       doc.moveTo(tableStartX, headerY).lineTo(tableEndX, headerY).stroke();
-      // Bottom border
       doc.moveTo(tableStartX, headerY + rowHeight).lineTo(tableEndX, headerY + rowHeight).stroke();
-      // Vertical borders at column boundaries
       colBoundaries.forEach((boundary, index) => {
         if (index > 0 && index < colBoundaries.length) {
           doc.moveTo(boundary, headerY).lineTo(boundary, headerY + rowHeight).stroke();
@@ -468,92 +457,120 @@ export function createReportCardPDF(
 
       yPos = headerY + rowHeight;
 
-      // Subjects Data with alternating row colors
       doc.fontSize(10).font('Helvetica').fillColor('#000000');
+      const sanitizeNumber = (value: any): number | null => {
+        if (value === null || value === undefined) {
+          return null;
+        }
+        const cleaned = typeof value === 'string' ? value.replace(/[^\d.-]/g, '') : value;
+        const parsed = Number(cleaned);
+        return Number.isFinite(parsed) ? parsed : null;
+      };
+
+      const getSubjectValue = (subject: any) => {
+        const subjectName = subject?.subject || subject?.subjectName || subject?.name || subject?.title || 'N/A';
+        const subjectCode = subject?.subjectCode || subject?.code || subject?.subject_code || '-';
+        const scoreValue = sanitizeNumber(subject?.score ?? subject?.markObtained ?? subject?.marks);
+        const maxScoreValue = sanitizeNumber(subject?.maxScore ?? subject?.possibleMark ?? subject?.totalMarks ?? subject?.outOf);
+        const classAverageValue = sanitizeNumber(subject?.classAverage ?? subject?.classAvg ?? subject?.average);
+        const percentageValue = sanitizeNumber(subject?.percentage ?? subject?.percent ?? subject?.scorePercentage) ?? 0;
+        const gradeValue = subject?.grade || subject?.gradeLabel || (subject?.gradeInfo?.label) || 'N/A';
+        const commentsValue = subject?.comments || subject?.comment || '-';
+        const pointsValueRaw = sanitizeNumber(subject?.points ?? subject?.scorePoints ?? subject?.pointValue);
+        return {
+          subjectName,
+          subjectCode,
+          scoreValue,
+          maxScoreValue,
+          classAverageValue,
+          percentageValue,
+          gradeValue,
+          commentsValue,
+          pointsValue: pointsValueRaw
+        };
+      };
+
       for (let index = 0; index < reportCard.subjects.length; index++) {
         const subject = reportCard.subjects[index];
+        const normalizedSubject = getSubjectValue(subject);
         const rowY = yPos;
         const isEvenRow = index % 2 === 0;
-        
-        // Alternate row background color
-        if (isEvenRow) {
-          doc.rect(tableStartX, rowY, tableEndX - tableStartX, rowHeight)
-            .fillColor('#F8F9FA')
-            .fill();
-        } else {
-          doc.rect(tableStartX, rowY, tableEndX - tableStartX, rowHeight)
-            .fillColor('#FFFFFF')
-            .fill();
-        }
 
-        const percentage = parseFloat(subject.percentage);
-        const grade = subject.grade || (subject.grade === 'N/A' ? 'N/A' : getGrade(percentage));
-        const scoreText = subject.grade === 'N/A' ? 'N/A' : Math.round(subject.score).toString();
-        const maxScoreText = subject.grade === 'N/A' ? 'N/A' : Math.round(subject.maxScore).toString();
-        const commentsText = subject.comments || '-';
+        doc.rect(tableStartX, rowY, tableEndX - tableStartX, rowHeight)
+          .fillColor(isEvenRow ? '#F8F9FA' : '#FFFFFF')
+          .fill();
+        doc.fillColor('#000000');
+        const percentage = normalizedSubject.percentageValue ?? 0;
+        const grade = normalizedSubject.gradeValue || (subject.grade === 'N/A' ? 'N/A' : getGrade(percentage));
+        const hasMarks = normalizedSubject.scoreValue !== null && grade !== 'N/A';
+        const scoreText = hasMarks ? Math.round(normalizedSubject.scoreValue!).toString() : 'N/A';
+        const commentsText = normalizedSubject.commentsValue || '-';
+        const classAverageText = normalizedSubject.classAverageValue !== null
+          ? `${Math.round(normalizedSubject.classAverageValue)}`
+          : 'N/A';
+        const pointsText = grade === 'N/A'
+          ? '-'
+          : (normalizedSubject.pointsValue !== null ? Math.round(normalizedSubject.pointsValue).toString() : (subject.points ?? 0).toString());
 
-        // Draw cell borders using same column boundaries
         doc.strokeColor('#CCCCCC').lineWidth(0.5);
-        // Top border
         doc.moveTo(tableStartX, rowY).lineTo(tableEndX, rowY).stroke();
-        // Bottom border
         doc.moveTo(tableStartX, rowY + rowHeight).lineTo(tableEndX, rowY + rowHeight).stroke();
-        // Vertical borders at column boundaries
         colBoundaries.forEach((boundary, index) => {
           if (index > 0 && index < colBoundaries.length) {
             doc.moveTo(boundary, rowY).lineTo(boundary, rowY + rowHeight).stroke();
           }
         });
 
-        // Cell text
-        doc.fillColor('#000000');
-        doc.text(subject.subject, colPositions.subject, rowY + 8, { width: colWidths.subject - 10 });
-        
-        // Subject Code
-        const subjectCodeText = subject.subjectCode || '-';
-        doc.text(subjectCodeText, colPositions.subjectCode, rowY + 8, { 
-          width: colWidths.subjectCode - 10,
-          align: 'center'
+        columnDefs.forEach(col => {
+          let text = '';
+          switch (col.key) {
+            case 'subject':
+              text = normalizedSubject.subjectName || '-';
+              break;
+            case 'subjectCode':
+              text = normalizedSubject.subjectCode || '-';
+              break;
+            case 'markObtained':
+              text = scoreText;
+              break;
+            case 'classAverage':
+              text = classAverageText;
+              break;
+            case 'grade': {
+              if (grade === 'N/A') {
+                doc.fillColor('#6C757D');
+              } else {
+                doc.fillColor('#000000');
+              }
+              const gradeWidth = col.width - 8;
+              const gradeTextWidth = doc.widthOfString(grade);
+              if (gradeTextWidth > gradeWidth) {
+                doc.fontSize(8);
+              }
+              text = grade;
+              break;
+            }
+            case 'points':
+              text = pointsText;
+              break;
+            case 'comments':
+              text = commentsText;
+              break;
+            default:
+              text = '';
+          }
+
+          const align = col.align || 'left';
+          doc.text(text, colPositions[col.key], rowY + 8, { width: col.width - 10, align });
+          if (col.key === 'grade') {
+            doc.fontSize(10).fillColor('#000000');
+          }
         });
-        
-        doc.text(scoreText, colPositions.markObtained, rowY + 8, { width: colWidths.markObtained - 10 });
-        doc.text(maxScoreText, colPositions.possibleMark, rowY + 8, { width: colWidths.possibleMark - 10 });
-        
-        // Class Average (without % symbol)
-        const classAverageText = subject.classAverage !== undefined && subject.classAverage !== null
-          ? `${Math.round(subject.classAverage)}`
-          : 'N/A';
-        doc.text(classAverageText, colPositions.classAverage, rowY + 8, { width: colWidths.classAverage - 10 });
-        
-        // Grade - always black color, ensure text fits well
-        if (grade === 'N/A') {
-          doc.fillColor('#6C757D'); // Gray for N/A
-        } else {
-          doc.fillColor('#000000'); // Black for all grades
-        }
-        // Use smaller font size if grade is very long to ensure it fits
-        const gradeWidth = colWidths.grade - 8; // Slightly more width for grade
-        const gradeTextWidth = doc.widthOfString(grade);
-        if (gradeTextWidth > gradeWidth) {
-          doc.fontSize(8); // Slightly smaller font for long grades
-        }
-        doc.text(grade, colPositions.grade, rowY + 8, { width: gradeWidth });
-        doc.fontSize(10); // Reset font size
-        doc.fillColor('#000000'); // Reset to black
-        
-        doc.text(commentsText, colPositions.comments, rowY + 8, { width: colWidths.comments - 10 });
 
         yPos += rowHeight;
 
-        // Calculate remaining space dynamically to show all subjects
-        // A4 page height is 842pt, with 50pt margins = 742pt usable
-        // Reserve space for sections below table:
-        // Summary: ~45pt, Remarks: ~140pt, Footer: ~30pt = ~215pt
-        // So table can extend up to ~527pt (742 - 215) to fit on one page
-        // Only break if we absolutely must to prevent overflow
-        const maxTableY = 527; // Allow table to use most of the page
+        const maxTableY = 527;
         if (yPos > maxTableY) {
-          // Only truncate if absolutely necessary (should rarely happen)
           break;
         }
       }
@@ -580,6 +597,10 @@ export function createReportCardPDF(
       doc.fontSize(9).font('Helvetica').fillColor('#003366'); // Dark blue
       const overallPercentage = parseFloat(reportCard.overallAverage);
       const overallGrade = reportCard.overallGrade || getGrade(overallPercentage);
+      const totalPointsValue = Number.isFinite(reportCard.totalPoints)
+        ? Number(reportCard.totalPoints)
+        : 0;
+      const isUpperForm = !!reportCard.isUpperForm;
       
       // Overall Average with colored background - positioned on the left
       const averageBoxX = 60;
@@ -607,11 +628,13 @@ export function createReportCardPDF(
         .strokeColor('#CCCCCC')
         .lineWidth(1)
         .stroke();
+      const secondaryLabel = isUpperForm ? 'Total Points: ' : 'Overall Grade: ';
+      const secondaryValue = isUpperForm ? `${Math.round(totalPointsValue)}` : overallGrade;
       doc.fillColor('#003366'); // Dark blue for label
-      doc.text('Overall Grade: ', gradeBoxX + 5, yPos);
-      const overallGradeLabelWidth = doc.widthOfString('Overall Grade: ');
+      doc.text(secondaryLabel, gradeBoxX + 5, yPos);
+      const secondaryLabelWidth = doc.widthOfString(secondaryLabel);
       doc.fillColor('#000000'); // Black for the value
-      doc.text(overallGrade, gradeBoxX + 5 + overallGradeLabelWidth, yPos);
+      doc.text(secondaryValue, gradeBoxX + 5 + secondaryLabelWidth, yPos);
       
       // Class Position removed from Summary - now in Exam Information section
 
@@ -743,53 +766,50 @@ export function createReportCardPDF(
         .lineWidth(1)
         .stroke();
 
-      // Grade Scale Items - arranged in rows
-      const gradeItems = [
-        { range: '90 – 100', label: gradeLabels.excellent || 'OUTSTANDING' },
-        { range: '80 – 89', label: gradeLabels.veryGood || 'VERY HIGH' },
-        { range: '60 – 79', label: gradeLabels.good || 'HIGH' },
-        { range: '40 – 59', label: gradeLabels.satisfactory || 'GOOD' },
-        { range: '20 – 39', label: gradeLabels.needsImprovement || 'ASPIRING' },
-        { range: '1 – 19', label: gradeLabels.basic || 'BASIC' },
-        { range: '0', label: gradeLabels.fail || 'UNCLASSIFIED' }
-      ];
+      // Grade Scale Items derived from settings
+      type ThresholdEntry = { key: string; min: number; label: string };
+      const thresholdEntries: ThresholdEntry[] = [
+        { key: 'excellent', min: thresholds.excellent ?? 90, label: gradeLabels.excellent || 'OUTSTANDING' },
+        { key: 'veryGood', min: thresholds.veryGood ?? 80, label: gradeLabels.veryGood || 'VERY HIGH' },
+        { key: 'good', min: thresholds.good ?? 60, label: gradeLabels.good || 'HIGH' },
+        { key: 'satisfactory', min: thresholds.satisfactory ?? 40, label: gradeLabels.satisfactory || 'GOOD' },
+        { key: 'needsImprovement', min: thresholds.needsImprovement ?? 20, label: gradeLabels.needsImprovement || 'ASPIRING' },
+        { key: 'basic', min: thresholds.basic ?? 1, label: gradeLabels.basic || 'BASIC' }
+      ].filter(entry => Number.isFinite(entry.min));
+      thresholdEntries.sort((a, b) => b.min - a.min);
 
-      // Calculate positions for grid layout (2 rows: 4 items in first row, 3 items in second row)
-      const itemWidth = 115; // Width for each item
+      const gradeItems = thresholdEntries.map((entry, index) => {
+        const upperBound = index === 0 ? 100 : Math.max(thresholdEntries[index - 1].min - 1, entry.min);
+        const rangeText = entry.min >= upperBound ? `${entry.min}+` : `${entry.min} – ${upperBound}`;
+        return { range: rangeText, label: entry.label };
+      });
+      const lowestMin = thresholdEntries[thresholdEntries.length - 1]?.min ?? 1;
+      const failUpperBound = Math.max(lowestMin - 1, 0);
+      gradeItems.push({
+        range: failUpperBound > 0 ? `0 – ${failUpperBound}` : '0',
+        label: gradeLabels.fail || 'UNCLASSIFIED'
+      });
+
+      // Calculate grid positions dynamically (up to 3 columns)
+      const columns = Math.min(3, gradeItems.length);
+      const rows = Math.ceil(gradeItems.length / columns);
+      const itemWidth = 150;
       const startX = 60;
       const startY = gradeScaleBoxY + 10;
       const rowGap = 35;
       const colGap = 20;
 
       gradeItems.forEach((item, index) => {
-        let row = Math.floor(index / 4);
-        let col = index % 4;
-        
-        // Adjust for last row (only 3 items) - center them
-        if (row === 1 && col >= 3) {
-          col = col - 1;
-        }
-        
-        // Center the last row items
-        let xPos;
-        if (row === 1) {
-          // Last row: center the 3 items
-          const lastRowStartX = startX + (itemWidth + colGap) * 0.5;
-          xPos = lastRowStartX + col * (itemWidth + colGap);
-        } else {
-          // First row: normal positioning
-          xPos = startX + col * (itemWidth + colGap);
-        }
-
+        const row = Math.floor(index / columns);
+        const col = index % columns;
+        const xPos = startX + col * (itemWidth + colGap);
         const yPosItem = startY + row * rowGap;
 
-        // Range
-        doc.fontSize(8).font('Helvetica-Bold').fillColor('#003366');
-        doc.text(item.range, xPos, yPosItem, { width: itemWidth });
-        
-        // Label
-        doc.fontSize(7).font('Helvetica').fillColor('#495057');
-        doc.text(item.label, xPos, yPosItem + 12, { width: itemWidth });
+        doc.fontSize(9).font('Helvetica-Bold').fillColor('#003366');
+        doc.text(item.range, xPos, yPosItem, { width: itemWidth, align: 'center' });
+
+        doc.fontSize(8).font('Helvetica').fillColor('#495057');
+        doc.text(item.label, xPos, yPosItem + 14, { width: itemWidth, align: 'center' });
       });
 
       // Footer - Position at bottom of page

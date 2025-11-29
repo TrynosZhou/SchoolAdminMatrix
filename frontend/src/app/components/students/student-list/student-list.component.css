@@ -10,11 +10,11 @@
 
 /* Header Styles */
 .page-header {
-  background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
   border-radius: 16px;
   padding: 30px 40px;
   margin-bottom: 30px;
-  box-shadow: 0 10px 30px rgba(79, 172, 254, 0.3);
+  box-shadow: 0 10px 30px rgba(102, 126, 234, 0.3);
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -253,15 +253,16 @@
   text-decoration: none;
 }
 
+/* Primary Button - matches header gradient */
 .btn-primary {
-  background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
-  color: white;
-  box-shadow: 0 4px 15px rgba(79, 172, 254, 0.4);
+  background: white;
+  color: #667eea;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
 }
 
 .btn-primary:hover {
   transform: translateY(-2px);
-  box-shadow: 0 6px 20px rgba(79, 172, 254, 0.5);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
 }
 
 .btn-secondary {
@@ -298,7 +299,7 @@
 }
 
 .card-header {
-  background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
   padding: 24px;
   display: flex;
   justify-content: space-between;
@@ -318,7 +319,7 @@
 }
 
 .student-avatar.male {
-  background: rgba(79, 172, 254, 0.3);
+  background: rgba(102, 126, 234, 0.3);
 }
 
 .student-avatar.female {
@@ -367,7 +368,7 @@
 }
 
 .student-badge.day-scholar {
-  color: #4facfe;
+  color: #667eea;
 }
 
 .card-body {
@@ -546,6 +547,25 @@
 .name-text {
   font-weight: 600;
   color: #333;
+}
+
+.status-badge {
+  display: inline-block;
+  padding: 4px 12px;
+  border-radius: 12px;
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.status-badge.status-enrolled {
+  background: #d4edda;
+  color: #155724;
+}
+
+.status-badge.status-not-enrolled {
+  background: #fff3cd;
+  color: #856404;
 }
 
 .type-badge {
@@ -866,6 +886,44 @@
 .alert-icon {
   font-size: 20px;
   font-weight: bold;
+}
+
+.pagination-bar {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+  margin: 20px 0;
+  flex-wrap: wrap;
+  background: white;
+  padding: 12px 16px;
+  border-radius: 12px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+}
+
+.pagination-bar .btn {
+  min-width: 120px;
+}
+
+.page-info {
+  font-weight: 600;
+  color: #4b5563;
+}
+
+.page-size-selector {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 500;
+  color: #4b5563;
+}
+
+.page-size-selector select {
+  padding: 6px 12px;
+  border-radius: 8px;
+  border: 1px solid #d1d5db;
+  background: #f9fafb;
+  font-weight: 600;
 }
 
 /* Responsive Design */

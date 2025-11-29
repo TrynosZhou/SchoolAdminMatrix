@@ -8,8 +8,10 @@ import { AuthRequest } from '../middleware/auth';
 import { generateTeacherId } from '../utils/teacherIdGenerator';
 import { isDemoUser } from '../utils/demoDataFilter';
 import { ensureDemoDataAvailable } from '../utils/demoDataEnsurer';
+import { isValidPhoneNumber, PHONE_VALIDATION_MESSAGE } from '../utils/phoneNumber';
 import { linkTeacherToClasses, syncManyToManyToJunctionTable } from '../utils/teacherClassLinker';
 import { calculateAge } from '../utils/ageUtils';
+import { buildPaginationResponse, parsePaginationParams } from '../utils/pagination';
 
 export const registerTeacher = async (req: AuthRequest, res: Response) => {
   try {
@@ -18,11 +20,16 @@ export const registerTeacher = async (req: AuthRequest, res: Response) => {
       await AppDataSource.initialize();
     }
 
-    const { firstName, lastName, phoneNumber, address, dateOfBirth, subjectIds, classIds } = req.body;
+    const { firstName, lastName, phoneNumber, address, dateOfBirth, qualification, subjectIds } = req.body;
     
     // Validate required fields
     if (!firstName || !lastName) {
       return res.status(400).json({ message: 'First name and last name are required' });
+    }
+
+    const trimmedPhoneNumber = phoneNumber?.trim();
+    if (!trimmedPhoneNumber || !isValidPhoneNumber(trimmedPhoneNumber)) {
+      return res.status(400).json({ message: PHONE_VALIDATION_MESSAGE });
     }
 
     const teacherRepository = AppDataSource.getRepository(Teacher);
@@ -57,8 +64,9 @@ export const registerTeacher = async (req: AuthRequest, res: Response) => {
       firstName: firstName.trim(),
       lastName: lastName.trim(),
       teacherId,
-      phoneNumber: phoneNumber?.trim() || null,
-      address: address?.trim() || null
+      phoneNumber: trimmedPhoneNumber,
+      address: address?.trim() || null,
+      qualification: qualification?.trim() || null
     };
 
     // Only include dateOfBirth if it's provided
@@ -66,19 +74,12 @@ export const registerTeacher = async (req: AuthRequest, res: Response) => {
 
     const teacher = teacherRepository.create(teacherData) as Teacher;
 
-    if (subjectIds) {
+    // Set teaching subjects if provided
+    if (subjectIds && Array.isArray(subjectIds) && subjectIds.length > 0) {
       const { Subject } = await import('../entities/Subject');
       const subjectRepository = AppDataSource.getRepository(Subject);
       const subjects = await subjectRepository.find({ where: { id: In(subjectIds) } });
       teacher.subjects = subjects;
-    }
-
-    // Set classes via ManyToMany for backward compatibility
-    if (classIds && Array.isArray(classIds) && classIds.length > 0) {
-      const { Class } = await import('../entities/Class');
-      const classRepository = AppDataSource.getRepository(Class);
-      const classes = await classRepository.find({ where: { id: In(classIds) } });
-      teacher.classes = classes;
     }
 
     // Save teacher
@@ -109,17 +110,6 @@ export const registerTeacher = async (req: AuthRequest, res: Response) => {
     // Link teacher to user account
     teacher.userId = user.id;
     await teacherRepository.save(teacher);
-
-    // Also link teacher to classes using the junction table (in addition to ManyToMany)
-    if (classIds && Array.isArray(classIds) && classIds.length > 0) {
-      try {
-        await linkTeacherToClasses(teacher.id, classIds);
-        console.log('[registerTeacher] Linked teacher to classes via junction table');
-      } catch (linkError: any) {
-        console.error('[registerTeacher] Error linking teacher to classes via junction table:', linkError);
-        // Continue - the teacher is saved with ManyToMany relation, junction table is optional
-      }
-    }
     
     // Load the teacher with relations
     const savedTeacher = await teacherRepository.findOne({
@@ -163,6 +153,8 @@ export const getTeachers = async (req: AuthRequest, res: Response) => {
     }
 
     const teacherRepository = AppDataSource.getRepository(Teacher);
+    const pagination = parsePaginationParams(req.query);
+    const searchQuery = typeof req.query.search === 'string' ? req.query.search.trim().toLowerCase() : '';
     
     // Try to load with relations, but handle errors gracefully
     let teachers;
@@ -215,7 +207,30 @@ export const getTeachers = async (req: AuthRequest, res: Response) => {
       }
     }
 
-    res.json(teachers);
+    let normalizedTeachers = Array.isArray(teachers) ? teachers : [];
+
+    if (searchQuery) {
+      normalizedTeachers = normalizedTeachers.filter((teacher: any) => {
+        const fullName = `${teacher.firstName || ''} ${teacher.lastName || ''}`.toLowerCase();
+        const teacherId = (teacher.teacherId || '').toLowerCase();
+        const phone = (teacher.phoneNumber || '').toLowerCase();
+        const qualification = (teacher.qualification || '').toLowerCase();
+        return (
+          fullName.includes(searchQuery) ||
+          teacherId.includes(searchQuery) ||
+          phone.includes(searchQuery) ||
+          qualification.includes(searchQuery)
+        );
+      });
+    }
+
+    if (pagination.isPaginated) {
+      const total = normalizedTeachers.length;
+      const paged = normalizedTeachers.slice(pagination.skip, pagination.skip + pagination.limit);
+      return res.json(buildPaginationResponse(paged, pagination.page, pagination.limit, total));
+    }
+
+    res.json(normalizedTeachers);
   } catch (error: any) {
     console.error('[getTeachers] Error:', error);
     console.error('[getTeachers] Error stack:', error.stack);
@@ -544,7 +559,7 @@ export const updateTeacher = async (req: AuthRequest, res: Response) => {
     }
 
     const { id } = req.params;
-    const { firstName, lastName, phoneNumber, address, dateOfBirth, subjectIds, classIds } = req.body;
+    const { firstName, lastName, phoneNumber, address, dateOfBirth, qualification, subjectIds } = req.body;
     
     const teacherRepository = AppDataSource.getRepository(Teacher);
     const teacher = await teacherRepository.findOne({
@@ -558,8 +573,15 @@ export const updateTeacher = async (req: AuthRequest, res: Response) => {
 
     if (firstName) teacher.firstName = firstName.trim();
     if (lastName) teacher.lastName = lastName.trim();
-    if (phoneNumber !== undefined) teacher.phoneNumber = phoneNumber?.trim() || null;
+    if (phoneNumber !== undefined) {
+      const trimmedPhone = phoneNumber?.trim();
+      if (!trimmedPhone || !isValidPhoneNumber(trimmedPhone)) {
+        return res.status(400).json({ message: PHONE_VALIDATION_MESSAGE });
+      }
+      teacher.phoneNumber = trimmedPhone;
+    }
     if (address !== undefined) teacher.address = address?.trim() || null;
+    if (qualification !== undefined) teacher.qualification = qualification?.trim() || null;
     if (dateOfBirth) {
       const parsedDate = typeof dateOfBirth === 'string' ? new Date(dateOfBirth) : dateOfBirth;
       if (!isNaN(parsedDate.getTime())) {
@@ -567,48 +589,20 @@ export const updateTeacher = async (req: AuthRequest, res: Response) => {
       }
     }
 
-    if (subjectIds) {
-      const { Subject } = await import('../entities/Subject');
-      const subjectRepository = AppDataSource.getRepository(Subject);
-      const subjects = await subjectRepository.find({ where: { id: In(subjectIds) } });
-      teacher.subjects = subjects;
-    }
-
-    // Set classes via ManyToMany for backward compatibility
-    if (classIds !== undefined) {
-      if (Array.isArray(classIds) && classIds.length > 0) {
-        const { Class } = await import('../entities/Class');
-        const classRepository = AppDataSource.getRepository(Class);
-        const classes = await classRepository.find({ where: { id: In(classIds) } });
-        teacher.classes = classes;
+    // Update teaching subjects if provided
+    if (subjectIds !== undefined) {
+      if (Array.isArray(subjectIds) && subjectIds.length > 0) {
+        const { Subject } = await import('../entities/Subject');
+        const subjectRepository = AppDataSource.getRepository(Subject);
+        const subjects = await subjectRepository.find({ where: { id: In(subjectIds) } });
+        teacher.subjects = subjects;
       } else {
-        teacher.classes = [];
+        teacher.subjects = [];
       }
     }
 
     // Save teacher
     await teacherRepository.save(teacher);
-
-    // Also link teacher to classes using the junction table (in addition to ManyToMany)
-    if (classIds !== undefined) {
-      if (Array.isArray(classIds) && classIds.length > 0) {
-        try {
-          await linkTeacherToClasses(teacher.id, classIds);
-          console.log('[updateTeacher] Linked teacher to classes via junction table');
-        } catch (linkError: any) {
-          console.error('[updateTeacher] Error linking teacher to classes via junction table:', linkError);
-          // Continue - the teacher is saved with ManyToMany relation, junction table is optional
-        }
-      } else {
-        // Empty array means remove all class links
-        try {
-          await linkTeacherToClasses(teacher.id, []);
-          console.log('[updateTeacher] Removed all class links for teacher');
-        } catch (linkError: any) {
-          console.error('[updateTeacher] Error removing class links:', linkError);
-        }
-      }
-    }
 
     const updatedTeacher = await teacherRepository.findOne({
       where: { id },
@@ -750,64 +744,78 @@ export const getTeacherClasses = async (req: AuthRequest, res: Response) => {
       name: `${teacher.firstName} ${teacher.lastName}`
     });
 
-    // Use the junction table to fetch classes (primary method)
-    const { TeacherClass } = await import('../entities/TeacherClass');
-    const teacherClassRepository = AppDataSource.getRepository(TeacherClass);
-
-    // Query the junction table using teacher.id (UUID) and filter for active classes only
-    const teacherClasses = await teacherClassRepository
-      .createQueryBuilder('tc')
-      .innerJoinAndSelect('tc.class', 'class')
-      .where('tc.teacherId = :teacherId', { teacherId: teacher.id })
-      .andWhere('class.isActive = :isActive', { isActive: true })
-      .getMany();
-
-    console.log('[getTeacherClasses] Found', teacherClasses.length, 'active class assignments in junction table');
-
     let classes: any[] = [];
 
-    if (teacherClasses.length > 0) {
-      // Extract class information from junction table
-      classes = teacherClasses.map(tc => ({
-        id: tc.class.id,
-        name: tc.class.name,
-        form: tc.class.form,
-        description: tc.class.description,
-        isActive: tc.class.isActive
-      }));
-      console.log('[getTeacherClasses] Classes loaded from junction table:', classes.map(c => c.name).join(', '));
-    } else {
-      // Fallback: try ManyToMany relation if junction table has no results
-      console.log('[getTeacherClasses] No classes in junction table, trying ManyToMany relation...');
-      const teacherWithClasses = await teacherRepository.findOne({
-        where: { id: teacher.id },
-        relations: ['classes']
-      });
+    // Try junction table first, but fallback gracefully if it fails
+    try {
+      const { TeacherClass } = await import('../entities/TeacherClass');
+      const teacherClassRepository = AppDataSource.getRepository(TeacherClass);
 
-      if (teacherWithClasses && teacherWithClasses.classes && teacherWithClasses.classes.length > 0) {
-        // Filter for active classes only
-        classes = teacherWithClasses.classes
-          .filter((c: any) => c.isActive === true)
-          .map((c: any) => ({
-            id: c.id,
-            name: c.name,
-            form: c.form,
-            description: c.description,
-            isActive: c.isActive
-          }));
-        console.log('[getTeacherClasses] Found', classes.length, 'active classes via ManyToMany relation:', classes.map(c => c.name).join(', '));
-        
-        // Sync to junction table for future queries
-        try {
-          const { linkTeacherToClasses } = await import('../utils/teacherClassLinker');
-          const classIds = classes.map(c => c.id);
-          await linkTeacherToClasses(teacher.id, classIds);
-          console.log('[getTeacherClasses] Synced classes to junction table');
-        } catch (syncError: any) {
-          console.error('[getTeacherClasses] Error syncing to junction table:', syncError.message);
+      // Query the junction table using teacher.id (UUID) and filter for active classes only
+      const teacherClasses = await teacherClassRepository
+        .createQueryBuilder('tc')
+        .innerJoinAndSelect('tc.class', 'class')
+        .where('tc.teacherId = :teacherId', { teacherId: teacher.id })
+        .andWhere('class.isActive = :isActive', { isActive: true })
+        .getMany();
+
+      console.log('[getTeacherClasses] Found', teacherClasses.length, 'active class assignments in junction table');
+
+      if (teacherClasses.length > 0) {
+        // Extract class information from junction table
+        classes = teacherClasses.map(tc => ({
+          id: tc.class.id,
+          name: tc.class.name,
+          form: tc.class.form,
+          description: tc.class.description,
+          isActive: tc.class.isActive
+        }));
+        console.log('[getTeacherClasses] Classes loaded from junction table:', classes.map(c => c.name).join(', '));
+      }
+    } catch (junctionError: any) {
+      console.warn('[getTeacherClasses] Junction table query failed, falling back to ManyToMany:', junctionError.message);
+      // Continue to ManyToMany fallback
+    }
+
+    // Fallback: try ManyToMany relation if junction table has no results or failed
+    if (classes.length === 0) {
+      try {
+        console.log('[getTeacherClasses] Trying ManyToMany relation...');
+        const teacherWithClasses = await teacherRepository.findOne({
+          where: { id: teacher.id },
+          relations: ['classes']
+        });
+
+        if (teacherWithClasses && teacherWithClasses.classes && teacherWithClasses.classes.length > 0) {
+          // Filter for active classes only
+          classes = teacherWithClasses.classes
+            .filter((c: any) => c.isActive === true)
+            .map((c: any) => ({
+              id: c.id,
+              name: c.name,
+              form: c.form,
+              description: c.description,
+              isActive: c.isActive
+            }));
+          console.log('[getTeacherClasses] Found', classes.length, 'active classes via ManyToMany relation:', classes.map(c => c.name).join(', '));
+          
+          // Sync to junction table for future queries (non-blocking)
+          try {
+            const { linkTeacherToClasses } = await import('../utils/teacherClassLinker');
+            const classIds = classes.map(c => c.id);
+            await linkTeacherToClasses(teacher.id, classIds);
+            console.log('[getTeacherClasses] Synced classes to junction table');
+          } catch (syncError: any) {
+            console.error('[getTeacherClasses] Error syncing to junction table:', syncError.message);
+            // Don't fail the request if sync fails
+          }
+        } else {
+          console.log('[getTeacherClasses] No classes found via any method');
         }
-      } else {
-        console.log('[getTeacherClasses] No classes found via any method');
+      } catch (relationError: any) {
+        console.error('[getTeacherClasses] Error loading via ManyToMany relation:', relationError.message);
+        // Return empty array if both methods fail
+        classes = [];
       }
     }
 
@@ -815,6 +823,184 @@ export const getTeacherClasses = async (req: AuthRequest, res: Response) => {
   } catch (error: any) {
     console.error('[getTeacherClasses] Error fetching teacher classes:', error);
     console.error('[getTeacherClasses] Error stack:', error.stack);
+    res.status(500).json({ 
+      message: 'Server error', 
+      error: error.message || 'Unknown error' 
+    });
+  }
+};
+
+// Assign classes to a teacher
+export const assignClassesToTeacher = async (req: AuthRequest, res: Response) => {
+  try {
+    if (!AppDataSource.isInitialized) {
+      await AppDataSource.initialize();
+    }
+
+    const { id } = req.params;
+    const { classIds } = req.body;
+
+    if (!classIds || !Array.isArray(classIds)) {
+      return res.status(400).json({ message: 'classIds must be an array' });
+    }
+
+    const teacherRepository = AppDataSource.getRepository(Teacher);
+    
+    // Find teacher by ID (UUID or teacherId)
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    let teacher: Teacher | null = null;
+    
+    if (uuidRegex.test(id)) {
+      teacher = await teacherRepository.findOne({ where: { id } });
+    } else {
+      teacher = await teacherRepository.findOne({ where: { teacherId: id } });
+    }
+
+    if (!teacher) {
+      return res.status(404).json({ message: 'Teacher not found' });
+    }
+
+    // Update ManyToMany relationship
+    if (classIds.length > 0) {
+      const { Class } = await import('../entities/Class');
+      const classRepository = AppDataSource.getRepository(Class);
+      const classes = await classRepository.find({ where: { id: In(classIds) } });
+      teacher.classes = classes;
+    } else {
+      teacher.classes = [];
+    }
+
+    await teacherRepository.save(teacher);
+
+    // Also update junction table
+    try {
+      await linkTeacherToClasses(teacher.id, classIds);
+      console.log('[assignClassesToTeacher] Updated junction table');
+    } catch (linkError: any) {
+      console.error('[assignClassesToTeacher] Error updating junction table:', linkError);
+      // Continue - ManyToMany is updated
+    }
+
+    // Get updated teacher with classes
+    const updatedTeacher = await teacherRepository.findOne({
+      where: { id: teacher.id },
+      relations: ['classes', 'subjects']
+    });
+
+    res.json({ 
+      message: 'Classes assigned successfully',
+      teacher: updatedTeacher
+    });
+  } catch (error: any) {
+    console.error('Error assigning classes to teacher:', error);
+    res.status(500).json({ 
+      message: 'Server error', 
+      error: error.message || 'Unknown error' 
+    });
+  }
+};
+
+// Get teacher load information
+export const getTeacherLoad = async (req: AuthRequest, res: Response) => {
+  try {
+    if (!AppDataSource.isInitialized) {
+      await AppDataSource.initialize();
+    }
+
+    const { id } = req.params;
+    const teacherRepository = AppDataSource.getRepository(Teacher);
+    
+    // Find teacher by ID (UUID or teacherId)
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    let teacher: Teacher | null = null;
+    
+    try {
+      if (uuidRegex.test(id)) {
+        teacher = await teacherRepository.findOne({ 
+          where: { id },
+          relations: ['classes', 'subjects']
+        });
+      } else {
+        teacher = await teacherRepository.findOne({ 
+          where: { teacherId: id },
+          relations: ['classes', 'subjects']
+        });
+      }
+    } catch (relationError: any) {
+      // If relations fail, try without them
+      console.warn('[getTeacherLoad] Error loading with relations, trying without:', relationError.message);
+      if (uuidRegex.test(id)) {
+        teacher = await teacherRepository.findOne({ where: { id } });
+      } else {
+        teacher = await teacherRepository.findOne({ where: { teacherId: id } });
+      }
+      if (teacher) {
+        (teacher as any).classes = [];
+        (teacher as any).subjects = [];
+      }
+    }
+
+    if (!teacher) {
+      return res.status(404).json({ message: 'Teacher not found' });
+    }
+
+    // Ensure arrays are initialized
+    if (!teacher.classes) {
+      (teacher as any).classes = [];
+    }
+    if (!teacher.subjects) {
+      (teacher as any).subjects = [];
+    }
+
+    // Get student count for each class
+    const { Student } = await import('../entities/Student');
+    const studentRepository = AppDataSource.getRepository(Student);
+    
+    const classLoads = await Promise.all(
+      (teacher.classes || []).map(async (classEntity) => {
+        try {
+          const studentCount = await studentRepository.count({
+            where: { classId: classEntity.id, isActive: true }
+          });
+          return {
+            id: classEntity.id,
+            name: classEntity.name,
+            form: classEntity.form,
+            studentCount
+          };
+        } catch (err: any) {
+          console.error('[getTeacherLoad] Error counting students for class:', classEntity.id, err.message);
+          return {
+            id: classEntity.id,
+            name: classEntity.name,
+            form: classEntity.form,
+            studentCount: 0
+          };
+        }
+      })
+    );
+
+    const totalStudents = classLoads.reduce((sum, cls) => sum + cls.studentCount, 0);
+    const totalClasses = teacher.classes?.length || 0;
+    const totalSubjects = teacher.subjects?.length || 0;
+
+    res.json({
+      teacher: {
+        id: teacher.id,
+        teacherId: teacher.teacherId,
+        firstName: teacher.firstName,
+        lastName: teacher.lastName,
+        qualification: teacher.qualification
+      },
+      load: {
+        totalClasses,
+        totalSubjects,
+        totalStudents,
+        classes: classLoads
+      }
+    });
+  } catch (error: any) {
+    console.error('Error fetching teacher load:', error);
     res.status(500).json({ 
       message: 'Server error', 
       error: error.message || 'Unknown error' 

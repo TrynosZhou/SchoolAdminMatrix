@@ -1,4 +1,4 @@
-import { Response } from 'express';
+import { Request, Response } from 'express';
 import { AppDataSource } from '../config/database';
 import { Settings } from '../entities/Settings';
 import { Invoice, InvoiceStatus } from '../entities/Invoice';
@@ -67,6 +67,16 @@ const DEFAULT_MODULE_ACCESS: Settings['moduleAccess'] = {
   }
 };
 
+const DEFAULT_GRADE_POINTS = {
+  excellent: 5, // A*
+  veryGood: 5, // A
+  good: 4, // B
+  satisfactory: 3, // C
+  needsImprovement: 2, // D
+  basic: 1, // E
+  fail: 0 // U
+};
+
 const ensureModuleAccessDefaults = (current?: Settings['moduleAccess'] | null): Settings['moduleAccess'] => {
   const existing = current || {};
   return {
@@ -117,6 +127,7 @@ export const getSettings = async (req: AuthRequest, res: Response) => {
             satisfactory: 60,
             needsImprovement: 50
           },
+          gradePoints: DEFAULT_GRADE_POINTS,
           academicYear: new Date().getFullYear().toString(),
           currentTerm: `Term 1 ${new Date().getFullYear()}`,
           currencySymbol: 'KES',
@@ -146,6 +157,7 @@ export const getSettings = async (req: AuthRequest, res: Response) => {
             satisfactory: 60,
             needsImprovement: 50
           },
+          gradePoints: DEFAULT_GRADE_POINTS,
           academicYear: new Date().getFullYear().toString(),
           currentTerm: `Term 1 ${new Date().getFullYear()}`,
           currencySymbol: 'KES',
@@ -164,6 +176,11 @@ export const getSettings = async (req: AuthRequest, res: Response) => {
         delete feesSettingsAny.tuitionFee;
         await settingsRepository.save(settings);
       }
+    }
+
+    if (settings && !settings.gradePoints) {
+      settings.gradePoints = { ...DEFAULT_GRADE_POINTS };
+      await settingsRepository.save(settings);
     }
 
     // Include school name from settings if available
@@ -186,6 +203,41 @@ export const getSettings = async (req: AuthRequest, res: Response) => {
     res.status(500).json({ 
       message: 'Server error', 
       error: error?.message || 'Unknown error' 
+    });
+  }
+};
+
+export const getPublicSplashSettings = async (_req: Request, res: Response) => {
+  try {
+    if (!AppDataSource.isInitialized) {
+      await AppDataSource.initialize();
+    }
+
+    const settingsRepository = AppDataSource.getRepository(Settings);
+    const settings = await settingsRepository.findOne({
+      order: { createdAt: 'DESC' }
+    });
+
+    if (!settings) {
+      return res.json({
+        schoolName: 'School Management System',
+        schoolLogo: null,
+        schoolLogo2: null,
+        schoolMotto: null
+      });
+    }
+
+    res.json({
+      schoolName: settings.schoolName || 'School Management System',
+      schoolLogo: settings.schoolLogo || null,
+      schoolLogo2: settings.schoolLogo2 || null,
+      schoolMotto: settings.schoolMotto || null
+    });
+  } catch (error: any) {
+    console.error('Error fetching public splash settings:', error);
+    res.status(500).json({
+      message: 'Server error',
+      error: error?.message || 'Unknown error'
     });
   }
 };
@@ -230,7 +282,8 @@ export const updateSettings = async (req: AuthRequest, res: Response) => {
       termStartDate,
       termEndDate,
       currencySymbol,
-      moduleAccess
+      moduleAccess,
+      gradePoints
     } = req.body;
 
     if (!settings) {
@@ -282,6 +335,18 @@ export const updateSettings = async (req: AuthRequest, res: Response) => {
     }
     if (gradeLabels !== undefined) {
       settings.gradeLabels = gradeLabels;
+    }
+    if (gradePoints !== undefined) {
+      const sanitizedGradePoints: typeof DEFAULT_GRADE_POINTS = { ...DEFAULT_GRADE_POINTS };
+      Object.keys(DEFAULT_GRADE_POINTS).forEach(key => {
+        const value = gradePoints[key];
+        if (value !== undefined && value !== null && !isNaN(Number(value))) {
+          sanitizedGradePoints[key as keyof typeof DEFAULT_GRADE_POINTS] = Number(value);
+        }
+      });
+      settings.gradePoints = sanitizedGradePoints;
+    } else if (!settings.gradePoints) {
+      settings.gradePoints = { ...DEFAULT_GRADE_POINTS };
     }
     if (schoolLogo !== undefined) {
       settings.schoolLogo = schoolLogo;

@@ -10,6 +10,7 @@ import { UniformItem } from '../entities/UniformItem';
 import { InvoiceUniformItem } from '../entities/InvoiceUniformItem';
 import { isDemoUser } from '../utils/demoDataFilter';
 import { parseAmount } from '../utils/numberUtils';
+import { buildPaginationResponse, parsePaginationParams } from '../utils/pagination';
 
 // Helper function to determine next term
 function getNextTerm(currentTerm: string): string {
@@ -281,6 +282,8 @@ export const getInvoices = async (req: AuthRequest, res: Response) => {
   try {
     const invoiceRepository = AppDataSource.getRepository(Invoice);
     const { studentId, status, invoiceId } = req.query as { studentId?: string; status?: string; invoiceId?: string };
+    const pagination = parsePaginationParams(req.query);
+    const searchQuery = typeof req.query.search === 'string' ? req.query.search.trim().toLowerCase() : '';
 
     // Demo users have full access to all invoices
     const where: any = {};
@@ -288,11 +291,25 @@ export const getInvoices = async (req: AuthRequest, res: Response) => {
     if (status) where.status = status;
     if (invoiceId) where.id = invoiceId;
 
-    const invoices = await invoiceRepository.find({
+    let invoices = await invoiceRepository.find({
       where,
       relations: ['student'],
       order: { createdAt: 'DESC' }
     });
+
+    if (searchQuery) {
+      invoices = invoices.filter(invoice => {
+        const invoiceNumber = (invoice.invoiceNumber || '').toLowerCase();
+        const studentName = `${invoice.student?.firstName || ''} ${invoice.student?.lastName || ''}`.toLowerCase();
+        return invoiceNumber.includes(searchQuery) || studentName.includes(searchQuery);
+      });
+    }
+
+    if (pagination.isPaginated) {
+      const total = invoices.length;
+      const paged = invoices.slice(pagination.skip, pagination.skip + pagination.limit);
+      return res.json(buildPaginationResponse(paged, pagination.page, pagination.limit, total));
+    }
 
     res.json(invoices);
   } catch (error) {

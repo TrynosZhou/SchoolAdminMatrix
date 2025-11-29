@@ -400,11 +400,6 @@ export class ReportCardComponent implements OnInit {
       return;
     }
 
-    if (!this.selectedSubjectId && !this.isAdmin && !this.isParent) {
-      this.error = 'Please select a subject';
-      return;
-    }
-
     // For parents, check balance again before generating
     if (this.isParent && this.parentStudentId) {
       if (this.studentBalance !== null && this.studentBalance > 0) {
@@ -466,10 +461,16 @@ export class ReportCardComponent implements OnInit {
               headmasterRemarks: null
             };
           }
+          card.subjects = (card.subjects || []).map((subject: any) => this.normalizeSubjectEntry(subject));
           return card;
         });
         this.filteredReportCards = [...this.reportCards];
-        this.classInfo = { name: data.class, examType: data.examType, term: data.term || this.selectedTerm };
+        this.classInfo = { 
+          name: data.class, 
+          examType: data.examType, 
+          term: data.term || this.selectedTerm,
+          isUpperForm: data.isUpperForm === true
+        };
         this.success = `Generated ${this.reportCards.length} report card(s) for ${data.class} - ${this.selectedTerm}`;
         this.loading = false;
       },
@@ -606,12 +607,7 @@ export class ReportCardComponent implements OnInit {
 
   // Validation
   isSelectionValid(): boolean {
-    if (this.isParent) {
-      // Parents don't need subject selection
-      return !!(this.selectedClass && this.selectedExamType && this.selectedTerm);
-    }
-    // Teachers need subject selection
-    return !!(this.selectedClass && this.selectedExamType && this.selectedTerm && (this.selectedSubjectId || this.isAdmin));
+    return !!(this.selectedClass && this.selectedExamType && this.selectedTerm);
   }
 
   isFieldInvalid(fieldName: string): boolean {
@@ -697,6 +693,32 @@ export class ReportCardComponent implements OnInit {
     };
 
     downloadNext();
+  }
+
+  private normalizeSubjectEntry(subject: any) {
+    const normalized: any = { ...subject };
+    const subjectName = subject?.subject || subject?.subjectName || subject?.name || subject?.title;
+    normalized.subject = subjectName ? String(subjectName).trim() : 'N/A';
+    normalized.subjectCode = subject?.subjectCode || subject?.code || subject?.subject_code || '-';
+    normalized.score = this.toNumber(subject?.score);
+    normalized.maxScore = this.toNumber(subject?.maxScore);
+    normalized.classAverage = this.toNumber(subject?.classAverage);
+    normalized.percentage = this.toNumber(subject?.percentage);
+    normalized.points = subject?.points !== undefined && subject?.points !== null
+      ? this.toNumber(subject.points)
+      : undefined;
+    return normalized;
+  }
+
+  private toNumber(value: any): number | null {
+    if (value === null || value === undefined || value === '') {
+      return null;
+    }
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed)) {
+      return null;
+    }
+    return Math.round(parsed);
   }
 }
 

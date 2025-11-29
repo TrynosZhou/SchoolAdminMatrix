@@ -70,7 +70,7 @@ export class MarksEntryComponent implements OnInit {
     console.log('Loading students for classId:', classId);
     console.log('Exam class:', this.exam?.class);
     
-    this.studentService.getStudents(classId).subscribe({
+    this.studentService.getStudents({ classId }).subscribe({
       next: (data: any) => {
         console.log('Received students data:', data);
         console.log('Number of students received:', data?.length || 0);

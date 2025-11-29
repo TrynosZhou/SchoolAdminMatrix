@@ -21,6 +21,14 @@ export class StudentListComponent implements OnInit {
   error = '';
   success = '';
   selectedStudent: any = null;
+  pagination = {
+    page: 1,
+    limit: 12,
+    total: 0,
+    totalPages: 1
+  };
+  pageSizeOptions = [12, 24, 48];
+  private searchDebounceTimer: any = null;
 
   constructor(
     private studentService: StudentService,
@@ -46,9 +54,24 @@ export class StudentListComponent implements OnInit {
 
   loadStudents() {
     this.loading = true;
-    this.studentService.getStudents(this.selectedClass || undefined).subscribe({
-      next: (data: any) => {
-        this.students = data || [];
+    this.studentService.getStudents({
+      classId: this.selectedClass || undefined,
+      studentType: this.selectedType || undefined,
+      gender: this.selectedGender || undefined,
+      search: this.searchQuery || undefined,
+      page: this.pagination.page,
+      limit: this.pagination.limit
+    }).subscribe({
+      next: (response: any) => {
+        if (Array.isArray(response)) {
+          this.students = response;
+          this.pagination.total = response.length;
+          this.pagination.totalPages = 1;
+        } else {
+          this.students = response?.data || [];
+          this.pagination.total = response?.total || this.students.length;
+          this.pagination.totalPages = response?.totalPages || 1;
+        }
         this.filteredStudents = this.students;
         this.loading = false;
       },
@@ -64,41 +87,18 @@ export class StudentListComponent implements OnInit {
   }
 
   filterStudents() {
-    let filtered = [...this.students];
+    this.pagination.page = 1;
+    this.loadStudents();
+  }
 
-    // Search filter
-    if (this.searchQuery.trim()) {
-      const query = this.searchQuery.toLowerCase().trim();
-      filtered = filtered.filter(student => {
-        const fullName = `${student.firstName} ${student.lastName}`.toLowerCase();
-        const studentNumber = (student.studentNumber || '').toLowerCase();
-        const contact = ((student.contactNumber || student.phoneNumber) || '').toLowerCase();
-        return fullName.includes(query) || studentNumber.includes(query) || contact.includes(query);
-      });
+  onSearchInput() {
+    if (this.searchDebounceTimer) {
+      clearTimeout(this.searchDebounceTimer);
     }
-
-    // Class filter
-    if (this.selectedClass) {
-      filtered = filtered.filter(student => {
-        return student.classId === this.selectedClass || student.class?.id === this.selectedClass;
-      });
-    }
-
-    // Type filter
-    if (this.selectedType) {
-      filtered = filtered.filter(student => {
-        return (student.studentType || 'Day Scholar') === this.selectedType;
-      });
-    }
-
-    // Gender filter
-    if (this.selectedGender) {
-      filtered = filtered.filter(student => {
-        return student.gender === this.selectedGender;
-      });
-    }
-
-    this.filteredStudents = filtered;
+    this.searchDebounceTimer = setTimeout(() => {
+      this.pagination.page = 1;
+      this.loadStudents();
+    }, 400);
   }
 
   clearFilters() {
@@ -106,7 +106,8 @@ export class StudentListComponent implements OnInit {
     this.selectedClass = '';
     this.selectedType = '';
     this.selectedGender = '';
-    this.filterStudents();
+    this.pagination.page = 1;
+    this.loadStudents();
   }
 
   hasActiveFilters(): boolean {
@@ -127,6 +128,23 @@ export class StudentListComponent implements OnInit {
 
   viewReportCard(studentId: string) {
     this.router.navigate(['/report-cards'], { queryParams: { studentId } });
+  }
+
+  getEnrollmentStatus(student: any): string {
+    if (student.classId || student.class?.id || student.classEntity?.id) {
+      return 'Enrolled';
+    }
+    return 'Not Enrolled';
+  }
+
+  getEnrollmentStatusClass(student: any): string {
+    return this.getEnrollmentStatus(student) === 'Enrolled' ? 'status-enrolled' : 'status-not-enrolled';
+  }
+
+  getClassName(student: any): string {
+    if (student.classEntity?.name) return student.classEntity.name;
+    if (student.class?.name) return student.class.name;
+    return 'N/A';
   }
 
   viewStudentIdCard(studentId: string) {
@@ -194,6 +212,24 @@ export class StudentListComponent implements OnInit {
         }, 7000);
       }
     });
+  }
+
+  changePage(page: number) {
+    if (page < 1 || page > this.pagination.totalPages || page === this.pagination.page) {
+      return;
+    }
+    this.pagination.page = page;
+    this.loadStudents();
+  }
+
+  changePageSize(limit: string | number) {
+    const parsedLimit = typeof limit === 'string' ? parseInt(limit, 10) : limit;
+    if (!parsedLimit || parsedLimit === this.pagination.limit) {
+      return;
+    }
+    this.pagination.limit = parsedLimit;
+    this.pagination.page = 1;
+    this.loadStudents();
   }
 
   deleteStudent(id: string, studentName: string, studentNumber: string) {

@@ -9,6 +9,8 @@ import {
   updateTeacher,
   deleteTeacher,
   getTeacherClasses,
+  assignClassesToTeacher,
+  getTeacherLoad,
   createTeacherAccount,
   syncTeacherClasses,
   diagnoseTeacherClasses
@@ -23,6 +25,8 @@ router.get('/me', authenticate, getCurrentTeacher); // Must be before /:id
 router.post('/sync-classes', authenticate, authorize(UserRole.SUPERADMIN, UserRole.ADMIN), syncTeacherClasses); // Sync endpoint
 router.get('/:teacherId/diagnose', authenticate, authorize(UserRole.SUPERADMIN, UserRole.ADMIN), diagnoseTeacherClasses); // Diagnostic endpoint
 router.get('/:id/classes', authenticate, getTeacherClasses); // Specific routes before /:id
+router.put('/:id/classes', authenticate, authorize(UserRole.SUPERADMIN, UserRole.ADMIN), assignClassesToTeacher); // Assign classes
+router.get('/:id/load', authenticate, getTeacherLoad); // Get teacher load
 router.get('/:id', authenticate, getTeacherById);
 router.post('/:id/create-account', authenticate, authorize(UserRole.SUPERADMIN, UserRole.ADMIN, UserRole.DEMO_USER), createTeacherAccount);
 router.put('/:id', authenticate, authorize(UserRole.SUPERADMIN, UserRole.ADMIN, UserRole.DEMO_USER), updateTeacher);

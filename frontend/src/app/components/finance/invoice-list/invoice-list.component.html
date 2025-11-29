@@ -21,14 +21,14 @@
   <div class="alert alert-error" *ngIf="error">{{ error }}</div>
   
   <!-- Statistics Cards -->
-  <div class="stats-grid" *ngIf="!loading && invoices.length > 0">
+  <div class="stats-grid" *ngIf="!loading && pagination.total > 0">
     <div class="stat-card primary">
       <div class="stat-icon">📄</div>
       <div class="stat-content">
-        <div class="stat-value">{{ filteredInvoices.length }}</div>
+        <div class="stat-value">{{ pagination.total }}</div>
         <div class="stat-label">Total Invoices</div>
-        <div class="stat-sublabel" *ngIf="invoices.length !== filteredInvoices.length">
-          {{ invoices.length }} total
+        <div class="stat-sublabel" *ngIf="filteredInvoices.length !== pagination.total">
+          Showing {{ filteredInvoices.length }} on this page
         </div>
       </div>
     </div>
@@ -157,8 +157,8 @@
               <input type="text" 
                      [(ngModel)]="invoiceSearchQuery" 
                      [ngModelOptions]="{standalone: true}"
-                     (input)="filterInvoices()"
-                     (keyup.enter)="filterInvoices()"
+                     (input)="onSearchInput()"
+                     (keyup.enter)="onSearchInput()"
                      placeholder="Search by student name, student number, invoice number, or term" 
                      class="form-control search-input">
             </div>
@@ -642,6 +642,24 @@
         </div>
       </div>
     </div>
+  </div>
+</div>
+
+<div class="pagination-bar" *ngIf="!loading && (pagination.totalPages > 1 || pagination.total > pagination.limit)">
+  <button class="btn btn-secondary" (click)="changePage(pagination.page - 1)" [disabled]="pagination.page === 1">
+    ‹ Previous
+  </button>
+  <span class="page-info">
+    Page {{ pagination.page }} of {{ pagination.totalPages }} • {{ pagination.total }} invoices
+  </span>
+  <button class="btn btn-secondary" (click)="changePage(pagination.page + 1)" [disabled]="pagination.page === pagination.totalPages">
+    Next ›
+  </button>
+  <div class="page-size-selector">
+    <label for="invoicePageSize">Rows per page:</label>
+    <select id="invoicePageSize" (change)="changePageSize($event.target.value)" [value]="pagination.limit">
+      <option *ngFor="let size of pageSizeOptions" [value]="size">{{ size }}</option>
+    </select>
   </div>
 </div>
 

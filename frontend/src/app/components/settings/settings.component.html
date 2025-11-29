@@ -10,7 +10,7 @@
       <span>{{ error }}</span>
     </div>
 
-    <div *ngIf="loading && !settings.studentIdPrefix">Loading settings...</div>
+    <div *ngIf="loading && (!settings.studentIdPrefix || !settings.teacherIdPrefix)">Loading settings...</div>
 
     <div class="demo-settings-banner" *ngIf="isDemoUser()">
       <div class="demo-settings-icon">🧪</div>
@@ -20,7 +20,7 @@
       </div>
     </div>
 
-    <form (ngSubmit)="onSubmit()" *ngIf="settings.studentIdPrefix">
+    <form (ngSubmit)="onSubmit()" *ngIf="settings.studentIdPrefix && settings.teacherIdPrefix">
       <fieldset
         [attr.disabled]="isDemoUser() ? true : null"
         [class.demo-readonly]="isDemoUser()">
@@ -31,6 +31,16 @@
           <label>Student ID Prefix *</label>
           <input type="text" [(ngModel)]="settings.studentIdPrefix" name="studentIdPrefix" required maxlength="10">
           <small>Prefix for auto-generated student IDs (e.g., JPS, ABC)</small>
+        </div>
+      </div>
+
+      <!-- Teacher ID Prefix -->
+      <div class="form-section">
+        <h2>Teacher ID Settings</h2>
+        <div class="form-group">
+          <label>Teacher ID Prefix *</label>
+          <input type="text" [(ngModel)]="settings.teacherIdPrefix" name="teacherIdPrefix" required maxlength="10">
+          <small>Prefix for auto-generated teacher IDs (e.g., JPST, TCH)</small>
         </div>
       </div>
 
@@ -492,6 +502,45 @@
           <input type="text" [(ngModel)]="settings.schoolMotto" name="schoolMotto" placeholder="Enter the school motto or tagline">
           <small>School motto or tagline (e.g., "After instruction we soar")</small>
         </div>
+      </div>
+
+      <!-- Grade Points -->
+      <div class="form-section" *ngIf="authService.hasRole('admin') || authService.hasRole('superadmin')">
+        <h2>🎯 Form 5 &amp; 6 Grade Points</h2>
+        <p class="section-description">
+          Update the points awarded for each Cambridge grade (A*–U). These values feed directly into the Form 5 &amp; 6 report cards and PDF exports.
+        </p>
+        <div class="grade-points-table-wrapper">
+          <table class="grade-points-table">
+            <thead>
+              <tr>
+                <th class="grade-column">Grade</th>
+                <th class="points-column">Points</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr *ngFor="let row of gradePointRows">
+                <td class="grade-column">
+                  <div class="grade-label">{{ row.label }}</div>
+                  <small class="grade-notes">{{ row.notes }}</small>
+                </td>
+                <td class="points-column">
+                  <input 
+                    type="number"
+                    min="0"
+                    step="1"
+                    [(ngModel)]="settings.gradePoints[row.key]"
+                    [name]="'gradePoints_' + row.key"
+                    class="points-input"
+                    aria-label="Points for grade {{ row.label }}">
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <small class="table-helper">
+          Tip: Enter whole numbers only. The default Cambridge scale equals 5 points for A*/A, 4 for B, 3 for C, 2 for D, 1 for E and 0 for U.
+        </small>
       </div>
 
       <!-- Academic Year & Term Management -->

@@ -12,10 +12,13 @@ export class FinanceService {
 
   constructor(private http: HttpClient) { }
 
-  getInvoices(studentId?: string, status?: string): Observable<any> {
+  getInvoices(studentId?: string, status?: string, page?: number, limit?: number, search?: string): Observable<any> {
     const params: any = {};
     if (studentId) params.studentId = studentId;
     if (status) params.status = status;
+    if (page) params.page = String(page);
+    if (limit) params.limit = String(limit);
+    if (search) params.search = search;
     return this.http.get(`${this.apiUrl}/finance`, { params });
   }
 

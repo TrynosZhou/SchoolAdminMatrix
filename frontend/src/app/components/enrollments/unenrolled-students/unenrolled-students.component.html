@@ -1,0 +1,101 @@
+<div class="unenrolled-container">
+  <!-- Header Section -->
+  <div class="page-header">
+    <div class="header-content">
+      <div class="header-title">
+        <h1>📋 Unenrolled Students</h1>
+        <p class="subtitle">Students who are registered but not yet enrolled in any class</p>
+      </div>
+      <button class="btn btn-primary btn-add" (click)="router.navigate(['/students/new'])">
+        <span class="btn-icon">➕</span>
+        <span>Register New Student</span>
+      </button>
+    </div>
+  </div>
+
+  <!-- Alert Messages -->
+  <div class="alert alert-error" *ngIf="error">
+    <span class="alert-icon">⚠️</span>
+    <span>{{ error }}</span>
+  </div>
+
+  <!-- Search Section -->
+  <div class="search-section">
+    <div class="search-box">
+      <input 
+        type="text" 
+        [(ngModel)]="searchQuery" 
+        placeholder="Search by name or student number..."
+        class="search-input"
+        (input)="filterStudents()">
+      <span class="search-icon">🔍</span>
+    </div>
+  </div>
+
+  <!-- Loading State -->
+  <div class="loading-container" *ngIf="loading">
+    <div class="spinner"></div>
+    <p>Loading unenrolled students...</p>
+  </div>
+
+  <!-- Students List -->
+  <div class="students-grid" *ngIf="!loading">
+    <div 
+      *ngFor="let student of filteredStudents" 
+      class="student-card">
+      <div class="student-header">
+        <div class="student-avatar">
+          <span class="avatar-text">{{ student.firstName.charAt(0) }}{{ student.lastName.charAt(0) }}</span>
+        </div>
+        <div class="student-info">
+          <h3>{{ student.firstName }} {{ student.lastName }}</h3>
+          <p class="student-number">{{ student.studentNumber }}</p>
+        </div>
+      </div>
+      <div class="student-details">
+        <div class="detail-item">
+          <span class="detail-label">Type:</span>
+          <span class="detail-value">{{ student.studentType }}</span>
+        </div>
+        <div class="detail-item">
+          <span class="detail-label">Gender:</span>
+          <span class="detail-value">{{ student.gender }}</span>
+        </div>
+        <div class="detail-item">
+          <span class="detail-label">Registered:</span>
+          <span class="detail-value">{{ formatDate(student.enrollmentDate) }}</span>
+        </div>
+        <div class="status-badge not-enrolled">
+          Not Enrolled
+        </div>
+      </div>
+      <div class="student-actions">
+        <button class="btn btn-primary btn-enroll" (click)="enrollStudent(student.id)">
+          <span class="btn-icon">📚</span>
+          <span>Enroll Now</span>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Empty State -->
+  <div class="empty-state" *ngIf="!loading && filteredStudents.length === 0">
+    <div class="empty-icon">✅</div>
+    <h3 *ngIf="searchQuery">No students found</h3>
+    <h3 *ngIf="!searchQuery">All students are enrolled!</h3>
+    <p *ngIf="searchQuery">Try adjusting your search query.</p>
+    <p *ngIf="!searchQuery">Great! All registered students have been enrolled into classes.</p>
+    <button class="btn btn-primary" (click)="router.navigate(['/students/new'])" *ngIf="!searchQuery">
+      <span class="btn-icon">➕</span>
+      <span>Register New Student</span>
+    </button>
+  </div>
+
+  <!-- Results Summary -->
+  <div class="results-summary" *ngIf="!loading && filteredStudents.length > 0">
+    <span class="summary-text">
+      Showing {{ filteredStudents.length }} unenrolled student{{ filteredStudents.length !== 1 ? 's' : '' }}
+    </span>
+  </div>
+</div>
+

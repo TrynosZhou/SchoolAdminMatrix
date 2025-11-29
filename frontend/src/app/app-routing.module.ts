@@ -6,6 +6,7 @@ import { StudentListComponent } from './components/students/student-list/student
 import { StudentFormComponent } from './components/students/student-form/student-form.component';
 import { TeacherListComponent } from './components/teachers/teacher-list/teacher-list.component';
 import { TeacherFormComponent } from './components/teachers/teacher-form/teacher-form.component';
+import { AssignClassesComponent } from './components/teachers/assign-classes/assign-classes.component';
 import { ExamListComponent } from './components/exams/exam-list/exam-list.component';
 import { ExamFormComponent } from './components/exams/exam-form/exam-form.component';
 import { MarksEntryComponent } from './components/exams/marks-entry/marks-entry.component';
@@ -34,6 +35,12 @@ import { RecordBookComponent } from './components/teacher/record-book/record-boo
 import { MyClassesComponent } from './components/teacher/my-classes/my-classes.component';
 import { TeacherRecordBookComponent } from './components/admin/teacher-record-book/teacher-record-book.component';
 import { TeacherDashboardComponent } from './components/teacher/teacher-dashboard/teacher-dashboard.component';
+import { TransferFormComponent } from './components/transfers/transfer-form/transfer-form.component';
+import { TransferHistoryComponent } from './components/transfers/transfer-history/transfer-history.component';
+import { EnrollStudentComponent } from './components/enrollments/enroll-student/enroll-student.component';
+import { UnenrolledStudentsComponent } from './components/enrollments/unenrolled-students/unenrolled-students.component';
+import { DHServicesReportComponent } from './components/reports/dh-services-report/dh-services-report.component';
+import { TransportServicesReportComponent } from './components/reports/transport-services-report/transport-services-report.component';
 import { AuthGuard } from './guards/auth.guard';
 import { ModuleAccessGuard } from './guards/module-access.guard';
 import { SplashComponent } from './components/splash/splash.component';
@@ -60,6 +67,7 @@ const routes: Routes = [
   { path: 'teachers', component: TeacherListComponent, canActivate: [AuthGuard] },
   { path: 'teachers/new', component: TeacherFormComponent, canActivate: [AuthGuard] },
   { path: 'teachers/:id/edit', component: TeacherFormComponent, canActivate: [AuthGuard] },
+  { path: 'teachers/assign-classes', component: AssignClassesComponent, canActivate: [AuthGuard] },
   { path: 'exams', component: ExamListComponent, canActivate: [AuthGuard] },
   { path: 'exams/new', component: ExamFormComponent, canActivate: [AuthGuard] },
   { path: 'exams/:id/marks', component: MarksEntryComponent, canActivate: [AuthGuard] },
@@ -80,6 +88,15 @@ const routes: Routes = [
   { path: 'schools', redirectTo: '/dashboard', pathMatch: 'full' },
   { path: 'attendance/mark', component: MarkAttendanceComponent, canActivate: [AuthGuard] },
   { path: 'attendance/reports', component: AttendanceReportsComponent, canActivate: [AuthGuard] },
+  { path: 'transfers/new', component: TransferFormComponent, canActivate: [AuthGuard] },
+  { path: 'transfers/history', component: TransferHistoryComponent, canActivate: [AuthGuard] },
+  { path: 'transfers', redirectTo: '/transfers/history', pathMatch: 'full' },
+  { path: 'student-management/transfer', component: TransferFormComponent, canActivate: [AuthGuard] },
+  { path: 'enrollments/new', component: EnrollStudentComponent, canActivate: [AuthGuard] },
+  { path: 'enrollments/unenrolled', component: UnenrolledStudentsComponent, canActivate: [AuthGuard] },
+  { path: 'enrollments', redirectTo: '/enrollments/unenrolled', pathMatch: 'full' },
+  { path: 'reports/dh-services', component: DHServicesReportComponent, canActivate: [AuthGuard] },
+  { path: 'reports/transport-services', component: TransportServicesReportComponent, canActivate: [AuthGuard] },
   { path: 'settings', component: SettingsComponent, canActivate: [AuthGuard] }
 ];
 

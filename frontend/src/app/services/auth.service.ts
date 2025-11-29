@@ -26,13 +26,26 @@ export class AuthService {
   private apiUrl = environment.apiUrl;
   private currentUserSubject = new BehaviorSubject<User | null>(null);
   public currentUser$ = this.currentUserSubject.asObservable();
+  private readonly inactivityTimeoutMs = (environment.sessionTimeoutMinutes || 30) * 60 * 1000;
+  private inactivityTimer: any = null;
+  private readonly activityEvents = ['mousemove', 'mousedown', 'keydown', 'scroll', 'touchstart'];
+  private activityListener = () => this.resetInactivityTimer();
+  private activityListenersAttached = false;
+  private readonly logoutMessageKey = 'sessionMessage';
 
   constructor(private http: HttpClient, private router: Router) {
     const token = localStorage.getItem('token');
     const user = localStorage.getItem('user');
     if (token && user) {
       this.currentUserSubject.next(JSON.parse(user));
+      this.startInactivityTracking();
     }
+
+    this.router.events.subscribe(() => {
+      if (this.isAuthenticated()) {
+        this.resetInactivityTimer();
+      }
+    });
   }
 
   login(identifier: string, password: string, teacherId?: string): Observable<any> {
@@ -60,6 +73,7 @@ export class AuthService {
           localStorage.setItem('user', JSON.stringify(response.user));
           // Update BehaviorSubject immediately
           this.currentUserSubject.next(response.user);
+          this.startInactivityTracking();
         } else {
           console.error('Invalid login response:', response);
           throw new Error('Invalid response from server');
@@ -72,10 +86,25 @@ export class AuthService {
     return this.http.post(`${this.apiUrl}/auth/register`, data);
   }
 
-  logout(): void {
+  logout(reason: 'manual' | 'timeout' | 'unauthorized' = 'manual'): void {
+    this.stopInactivityTracking();
     localStorage.removeItem('token');
     localStorage.removeItem('user');
     this.currentUserSubject.next(null);
+
+    if (reason === 'timeout') {
+      sessionStorage.setItem(this.logoutMessageKey, 'Your session has expired due to inactivity. Please log in again.');
+    } else if (reason === 'unauthorized') {
+      sessionStorage.setItem(this.logoutMessageKey, 'Your session has expired. Please log in again.');
+    }
+
+    if (reason === 'manual') {
+      this.http.post(`${this.apiUrl}/auth/logout`, {}).subscribe({
+        next: () => {},
+        error: () => {}
+      });
+    }
+
     this.router.navigate(['/login']);
   }
 
@@ -117,6 +146,52 @@ export class AuthService {
 
   unlinkStudent(studentId: string): Observable<any> {
     return this.http.delete(`${this.apiUrl}/parent/unlink-student/${studentId}`);
+  }
+
+  private startInactivityTracking(): void {
+    if (!this.isBrowser() || !this.isAuthenticated()) {
+      return;
+    }
+    this.registerActivityListeners();
+    this.resetInactivityTimer();
+  }
+
+  private stopInactivityTracking(): void {
+    if (!this.isBrowser()) {
+      return;
+    }
+    if (this.inactivityTimer) {
+      clearTimeout(this.inactivityTimer);
+      this.inactivityTimer = null;
+    }
+    if (this.activityListenersAttached) {
+      this.activityEvents.forEach(event => window.removeEventListener(event, this.activityListener, true));
+      this.activityListenersAttached = false;
+    }
+  }
+
+  private registerActivityListeners(): void {
+    if (!this.isBrowser() || this.activityListenersAttached) {
+      return;
+    }
+    this.activityEvents.forEach(event => window.addEventListener(event, this.activityListener, true));
+    this.activityListenersAttached = true;
+  }
+
+  private resetInactivityTimer(): void {
+    if (!this.isBrowser()) return;
+    if (this.inactivityTimer) {
+      clearTimeout(this.inactivityTimer);
+    }
+    this.inactivityTimer = window.setTimeout(() => this.handleSessionTimeout(), this.inactivityTimeoutMs);
+  }
+
+  private handleSessionTimeout(): void {
+    this.logout('timeout');
+  }
+
+  private isBrowser(): boolean {
+    return typeof window !== 'undefined';
   }
 }
 

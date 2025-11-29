@@ -20,6 +20,14 @@ export class ClassListComponent implements OnInit {
   sortBy: string = 'name';
   sortColumn: string = 'name';
   sortDirection: 'asc' | 'desc' = 'asc';
+  pagination = {
+    page: 1,
+    limit: 12,
+    total: 0,
+    totalPages: 1
+  };
+  pageSizeOptions = [12, 24, 48];
+  private searchDebounceTimer: any = null;
 
   constructor(
     private classService: ClassService,
@@ -52,11 +60,22 @@ export class ClassListComponent implements OnInit {
     this.loading = true;
     this.error = '';
     // Note: success message is preserved if set from query params
-    this.classService.getClasses().subscribe({
+    this.classService.getClasses({
+      page: this.pagination.page,
+      limit: this.pagination.limit,
+      search: this.searchTerm || undefined
+    }).subscribe({
       next: (data: any) => {
-        this.classes = data || [];
-        this.filteredClasses = [...this.classes];
-        this.sortClasses();
+        if (Array.isArray(data)) {
+          this.classes = data;
+          this.pagination.total = data.length;
+          this.pagination.totalPages = 1;
+        } else {
+          this.classes = data?.data || [];
+          this.pagination.total = data?.total || this.classes.length;
+          this.pagination.totalPages = data?.totalPages || 1;
+        }
+        this.applyFilters();
         this.loading = false;
       },
       error: (err: any) => {
@@ -87,21 +106,17 @@ export class ClassListComponent implements OnInit {
   }
 
   filterClasses() {
+    this.applyFilters();
+  }
+
+  private applyFilters() {
     this.filteredClasses = this.classes.filter(classItem => {
-      // Search filter
-      const matchesSearch = !this.searchTerm || 
-        classItem.name?.toLowerCase().includes(this.searchTerm.toLowerCase()) ||
-        classItem.form?.toLowerCase().includes(this.searchTerm.toLowerCase()) ||
-        classItem.description?.toLowerCase().includes(this.searchTerm.toLowerCase());
-      
-      // Status filter
       const matchesStatus = this.statusFilter === 'all' ||
         (this.statusFilter === 'active' && classItem.isActive) ||
         (this.statusFilter === 'inactive' && !classItem.isActive);
-      
-      return matchesSearch && matchesStatus;
+      return matchesStatus;
     });
-    
+
     this.sortClasses();
   }
 
@@ -153,13 +168,15 @@ export class ClassListComponent implements OnInit {
 
   clearSearch() {
     this.searchTerm = '';
-    this.filterClasses();
+    this.pagination.page = 1;
+    this.loadClasses();
   }
 
   clearFilters() {
     this.searchTerm = '';
     this.statusFilter = 'all';
-    this.filterClasses();
+    this.pagination.page = 1;
+    this.loadClasses();
   }
 
   truncate(text: string, length: number): string {
@@ -239,6 +256,32 @@ export class ClassListComponent implements OnInit {
         }, 8000);
       }
     });
+  }
+
+  onSearchInput() {
+    if (this.searchDebounceTimer) {
+      clearTimeout(this.searchDebounceTimer);
+    }
+    this.searchDebounceTimer = setTimeout(() => {
+      this.pagination.page = 1;
+      this.loadClasses();
+    }, 400);
+  }
+
+  changePage(page: number) {
+    if (page < 1 || page > this.pagination.totalPages || page === this.pagination.page) {
+      return;
+    }
+    this.pagination.page = page;
+    this.loadClasses();
+  }
+
+  changePageSize(limit: string | number) {
+    const parsedLimit = typeof limit === 'string' ? parseInt(limit, 10) : limit;
+    if (!parsedLimit || parsedLimit === this.pagination.limit) return;
+    this.pagination.limit = parsedLimit;
+    this.pagination.page = 1;
+    this.loadClasses();
   }
 }
 

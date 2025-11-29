@@ -11,8 +11,12 @@ export class ClassService {
 
   constructor(private http: HttpClient) { }
 
-  getClasses(): Observable<any> {
-    return this.http.get(`${this.apiUrl}/classes`);
+  getClasses(options: { page?: number; limit?: number; search?: string } = {}): Observable<any> {
+    const params: any = {};
+    if (options.page) params.page = String(options.page);
+    if (options.limit) params.limit = String(options.limit);
+    if (options.search) params.search = options.search;
+    return this.http.get(`${this.apiUrl}/classes`, { params });
   }
 
   getClassById(id: string): Observable<any> {

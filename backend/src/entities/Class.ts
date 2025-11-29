@@ -2,6 +2,7 @@ import { Entity, PrimaryGeneratedColumn, Column, OneToMany, ManyToMany, JoinTabl
 import { Student } from './Student';
 import { Teacher } from './Teacher';
 import { Subject } from './Subject';
+import { StudentEnrollment } from './StudentEnrollment';
 
 @Entity('classes')
 @Index(['name'], { unique: true })
@@ -23,6 +24,9 @@ export class Class {
 
   @OneToMany(() => Student, 'classEntity')
   students: Student[];
+
+  @OneToMany(() => StudentEnrollment, enrollment => enrollment.classEntity)
+  enrollments: StudentEnrollment[];
 
   @ManyToMany(() => Teacher, teacher => teacher.classes)
   teachers: Teacher[];
