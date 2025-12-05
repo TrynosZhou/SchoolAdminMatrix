@@ -4,6 +4,7 @@ import { AuthService } from '../../../services/auth.service';
 import { TeacherService } from '../../../services/teacher.service';
 import { SettingsService } from '../../../services/settings.service';
 import { ModuleAccessService } from '../../../services/module-access.service';
+import { ClassService } from '../../../services/class.service';
 
 @Component({
   selector: 'app-teacher-dashboard',
@@ -28,6 +29,7 @@ export class TeacherDashboardComponent implements OnInit {
     private teacherService: TeacherService,
     private settingsService: SettingsService,
     private moduleAccessService: ModuleAccessService,
+    private classService: ClassService,
     private router: Router,
     private cdr: ChangeDetectorRef
   ) {
@@ -301,7 +303,7 @@ export class TeacherDashboardComponent implements OnInit {
       next: (response: any) => {
         const classes = response.classes || [];
         // Only use classes from the dedicated endpoint (these are from junction table)
-        this.teacherClasses = classes;
+        this.teacherClasses = this.classService.sortClasses(classes);
         console.log('✓ Assigned classes loaded from dedicated endpoint:', this.teacherClasses.length);
         console.log('Classes:', this.teacherClasses.map(c => c.name).join(', '));
         this.loading = false;
@@ -309,7 +311,8 @@ export class TeacherDashboardComponent implements OnInit {
       error: (err: any) => {
         console.error('Error loading teacher classes:', err);
         // Fallback to classes from teacher object if available
-        this.teacherClasses = this.teacher?.classes || [];
+        const fallbackClasses = this.teacher?.classes || [];
+        this.teacherClasses = this.classService.sortClasses(fallbackClasses);
         console.log('Using fallback classes from teacher object:', this.teacherClasses.length);
         this.loading = false;
       }

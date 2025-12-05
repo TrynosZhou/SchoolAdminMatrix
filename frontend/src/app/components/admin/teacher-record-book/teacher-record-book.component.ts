@@ -2,6 +2,7 @@ import { Component, OnInit } from '@angular/core';
 import { TeacherService } from '../../../services/teacher.service';
 import { RecordBookService } from '../../../services/record-book.service';
 import { SettingsService } from '../../../services/settings.service';
+import { ClassService } from '../../../services/class.service';
 import { HttpClient } from '@angular/common/http';
 import { environment } from '../../../../environments/environment';
 
@@ -68,6 +69,7 @@ export class TeacherRecordBookComponent implements OnInit {
     private teacherService: TeacherService,
     private recordBookService: RecordBookService,
     private settingsService: SettingsService,
+    private classService: ClassService,
     private http: HttpClient
   ) { }
 
@@ -137,7 +139,8 @@ export class TeacherRecordBookComponent implements OnInit {
 
   selectTeacher(teacher: any) {
     this.selectedTeacher = teacher;
-    this.teacherClasses = teacher.classes || [];
+    const classesList = teacher.classes || [];
+    this.teacherClasses = this.classService.sortClasses(classesList);
     this.availableSubjects = teacher.subjects || [];
     this.selectedClassId = '';
     this.selectedClass = null;

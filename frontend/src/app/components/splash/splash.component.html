@@ -4,7 +4,10 @@
 
   <div class="splash-card glass">
     <div class="logo-container">
-      <img [src]="schoolLogo || defaultLogoPath" [alt]="schoolName + ' logo'">
+      <img 
+        [src]="schoolLogo || defaultLogoPath" 
+        [alt]="schoolName + ' logo'"
+        (error)="onLogoError()">
     </div>
     <div class="headline">
       <span class="eyebrow">Welcome to</span>

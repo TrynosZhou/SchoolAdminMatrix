@@ -82,6 +82,29 @@ export class AuthService {
     );
   }
 
+  studentLogin(studentId: string, dateOfBirth: string): Observable<any> {
+    const loginData = { studentId, dateOfBirth };
+    
+    console.log('[AuthService] Student login called:', { studentId, dateOfBirth });
+    console.log('[AuthService] Calling endpoint:', `${this.apiUrl}/auth/student/login`);
+    
+    return this.http.post(`${this.apiUrl}/auth/student/login`, loginData).pipe(
+      tap((response: any) => {
+        if (response && response.token && response.user) {
+          // Store token and user synchronously
+          localStorage.setItem('token', response.token);
+          localStorage.setItem('user', JSON.stringify(response.user));
+          // Update BehaviorSubject immediately
+          this.currentUserSubject.next(response.user);
+          this.startInactivityTracking();
+        } else {
+          console.error('Invalid login response:', response);
+          throw new Error('Invalid response from server');
+        }
+      })
+    );
+  }
+
   register(data: any): Observable<any> {
     return this.http.post(`${this.apiUrl}/auth/register`, data);
   }

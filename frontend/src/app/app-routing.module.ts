@@ -13,6 +13,9 @@ import { MarksEntryComponent } from './components/exams/marks-entry/marks-entry.
 import { ReportCardComponent } from './components/exams/report-card/report-card.component';
 import { RankingsComponent } from './components/exams/rankings/rankings.component';
 import { MarkSheetComponent } from './components/exams/mark-sheet/mark-sheet.component';
+import { ModerateMarkComponent } from './components/exams/moderate-mark/moderate-mark.component';
+import { MarkInputProgressComponent } from './components/exams/mark-input-progress/mark-input-progress.component';
+import { PublishResultsComponent } from './components/exams/publish-results/publish-results.component';
 import { InvoiceListComponent } from './components/finance/invoice-list/invoice-list.component';
 import { InvoiceFormComponent } from './components/finance/invoice-form/invoice-form.component';
 import { InvoiceStatementsComponent } from './components/finance/invoice-statements/invoice-statements.component';
@@ -20,6 +23,7 @@ import { RecordPaymentComponent } from './components/finance/record-payment/reco
 import { OutstandingBalanceComponent } from './components/finance/outstanding-balance/outstanding-balance.component';
 import { ClassListComponent } from './components/classes/class-list/class-list.component';
 import { ClassFormComponent } from './components/classes/class-form/class-form.component';
+import { ClassListsComponent } from './components/classes/class-lists/class-lists.component';
 import { SubjectListComponent } from './components/subjects/subject-list/subject-list.component';
 import { SubjectFormComponent } from './components/subjects/subject-form/subject-form.component';
 import { SettingsComponent } from './components/settings/settings.component';
@@ -41,9 +45,15 @@ import { EnrollStudentComponent } from './components/enrollments/enroll-student/
 import { UnenrolledStudentsComponent } from './components/enrollments/unenrolled-students/unenrolled-students.component';
 import { DHServicesReportComponent } from './components/reports/dh-services-report/dh-services-report.component';
 import { TransportServicesReportComponent } from './components/reports/transport-services-report/transport-services-report.component';
+import { StudentIdCardsComponent } from './components/reports/student-id-cards/student-id-cards.component';
 import { AuthGuard } from './guards/auth.guard';
 import { ModuleAccessGuard } from './guards/module-access.guard';
 import { SplashComponent } from './components/splash/splash.component';
+import { TimetableConfigComponent } from './components/timetable/timetable-config/timetable-config.component';
+import { TimetableViewComponent } from './components/timetable/timetable-view/timetable-view.component';
+import { StudentDashboardComponent } from './components/student/student-dashboard/student-dashboard.component';
+import { StudentReportCardComponent } from './components/student/student-report-card/student-report-card.component';
+import { StudentInvoiceStatementComponent } from './components/student/student-invoice-statement/student-invoice-statement.component';
 
 const routes: Routes = [
   { path: '', component: SplashComponent },
@@ -70,10 +80,13 @@ const routes: Routes = [
   { path: 'teachers/assign-classes', component: AssignClassesComponent, canActivate: [AuthGuard] },
   { path: 'exams', component: ExamListComponent, canActivate: [AuthGuard] },
   { path: 'exams/new', component: ExamFormComponent, canActivate: [AuthGuard] },
+  { path: 'exams/moderate-mark', component: ModerateMarkComponent, canActivate: [AuthGuard] },
+  { path: 'exams/mark-input-progress', component: MarkInputProgressComponent, canActivate: [AuthGuard] },
   { path: 'exams/:id/marks', component: MarksEntryComponent, canActivate: [AuthGuard] },
   { path: 'report-cards', component: ReportCardComponent, canActivate: [AuthGuard] },
   { path: 'mark-sheet', component: MarkSheetComponent, canActivate: [AuthGuard] },
   { path: 'rankings', component: RankingsComponent, canActivate: [AuthGuard] },
+  { path: 'publish-results', component: PublishResultsComponent, canActivate: [AuthGuard] },
   { path: 'invoices', component: InvoiceListComponent, canActivate: [AuthGuard, ModuleAccessGuard], data: { module: 'finance' } },
   { path: 'invoices/new', component: InvoiceFormComponent, canActivate: [AuthGuard, ModuleAccessGuard], data: { module: 'finance' } },
   { path: 'invoices/statements', component: InvoiceStatementsComponent, canActivate: [AuthGuard, ModuleAccessGuard], data: { module: 'finance' } },
@@ -82,6 +95,7 @@ const routes: Routes = [
   { path: 'classes', component: ClassListComponent, canActivate: [AuthGuard] },
   { path: 'classes/new', component: ClassFormComponent, canActivate: [AuthGuard] },
   { path: 'classes/:id/edit', component: ClassFormComponent, canActivate: [AuthGuard] },
+  { path: 'classes/lists', component: ClassListsComponent, canActivate: [AuthGuard] },
   { path: 'subjects', component: SubjectListComponent, canActivate: [AuthGuard] },
   { path: 'subjects/new', component: SubjectFormComponent, canActivate: [AuthGuard] },
   { path: 'subjects/:id/edit', component: SubjectFormComponent, canActivate: [AuthGuard] },
@@ -97,7 +111,13 @@ const routes: Routes = [
   { path: 'enrollments', redirectTo: '/enrollments/unenrolled', pathMatch: 'full' },
   { path: 'reports/dh-services', component: DHServicesReportComponent, canActivate: [AuthGuard] },
   { path: 'reports/transport-services', component: TransportServicesReportComponent, canActivate: [AuthGuard] },
-  { path: 'settings', component: SettingsComponent, canActivate: [AuthGuard] }
+  { path: 'reports/student-id-cards', component: StudentIdCardsComponent, canActivate: [AuthGuard] },
+  { path: 'timetable/config', component: TimetableConfigComponent, canActivate: [AuthGuard] },
+  { path: 'timetable', component: TimetableViewComponent, canActivate: [AuthGuard] },
+  { path: 'settings', component: SettingsComponent, canActivate: [AuthGuard] },
+  { path: 'student/dashboard', component: StudentDashboardComponent, canActivate: [AuthGuard] },
+  { path: 'student/report-card', component: StudentReportCardComponent, canActivate: [AuthGuard] },
+  { path: 'student/invoice-statement', component: StudentInvoiceStatementComponent, canActivate: [AuthGuard] }
 ];
 
 @NgModule({

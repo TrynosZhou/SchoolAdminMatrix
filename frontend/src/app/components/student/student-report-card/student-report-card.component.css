@@ -1,0 +1,353 @@
+.student-report-card-container {
+  padding: 20px;
+  max-width: 1200px;
+  margin: 0 auto;
+  background: #f5f5f5;
+  min-height: 100vh;
+}
+
+.page-header {
+  margin-bottom: 30px;
+}
+
+.header-content {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  flex-wrap: wrap;
+}
+
+.page-header h1 {
+  margin: 0;
+  color: #333;
+  font-size: 28px;
+}
+
+.subtitle {
+  margin: 5px 0 0 0;
+  color: #666;
+  font-size: 14px;
+}
+
+.alert {
+  padding: 12px 16px;
+  border-radius: 6px;
+  margin-bottom: 20px;
+}
+
+.alert-error {
+  background: #fee;
+  border: 1px solid #fcc;
+  color: #c33;
+}
+
+.loading-container {
+  text-align: center;
+  padding: 40px;
+  color: #666;
+}
+
+.report-card-content {
+  background: white;
+  border-radius: 10px;
+  padding: 30px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+/* School Header */
+.school-header {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 20px;
+  flex-wrap: wrap;
+  margin-bottom: 25px;
+  padding: 20px;
+  background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+  border-radius: 8px;
+  position: relative;
+}
+
+.school-logo-wrapper {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  background: #ffffff;
+  border-radius: 8px;
+  padding: 10px 14px;
+}
+
+.school-logo-wrapper.school-logo-left {
+  position: absolute;
+  top: 20px;
+  left: 20px;
+  margin: 0;
+}
+
+.school-logo-wrapper.school-logo-right {
+  position: absolute;
+  top: 20px;
+  right: 20px;
+  margin: 0;
+}
+
+.school-logo {
+  max-height: 80px;
+  max-width: 150px;
+  object-fit: contain;
+}
+
+.school-text {
+  text-align: center;
+  min-width: 200px;
+  flex: 1;
+  margin: 0 auto;
+  max-width: calc(100% - 400px);
+}
+
+.school-header h3 {
+  margin: 0 0 10px 0;
+  font-size: 24px;
+  color: #000000;
+  font-weight: 700;
+}
+
+.school-address {
+  margin: 5px 0;
+  color: #6c757d;
+  font-size: 14px;
+}
+
+.school-phone {
+  margin: 5px 0;
+  color: #6c757d;
+  font-size: 14px;
+}
+
+.academic-year {
+  margin: 5px 0 0 0;
+  color: #6c757d;
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.info-section,
+.subjects-section,
+.remarks-section {
+  margin-bottom: 30px;
+}
+
+.info-section h2,
+.subjects-section h2,
+.remarks-section h2 {
+  margin: 0 0 20px 0;
+  color: #333;
+  font-size: 22px;
+  border-bottom: 2px solid #e0e0e0;
+  padding-bottom: 10px;
+}
+
+.info-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+  gap: 15px;
+}
+
+.info-item {
+  display: flex;
+  justify-content: space-between;
+  padding: 12px;
+  background: #f8f9fa;
+  border-radius: 6px;
+}
+
+.info-item .label {
+  font-weight: 600;
+  color: #666;
+}
+
+.info-item .value {
+  color: #333;
+  font-weight: 500;
+}
+
+.subjects-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 20px;
+}
+
+.subjects-table th,
+.subjects-table td {
+  padding: 12px;
+  text-align: left;
+  border-bottom: 1px solid #e0e0e0;
+}
+
+.subjects-table th {
+  background: #3498db;
+  color: white;
+  font-weight: 600;
+  text-align: center;
+}
+
+.subjects-table tbody tr {
+  background: #f5f5f5;
+}
+
+.subjects-table tbody tr:hover {
+  background: #e8e8e8;
+}
+
+.subjects-table tbody td {
+  color: #000;
+  font-weight: normal;
+  text-align: center;
+}
+
+.subjects-table .total-row {
+  background: #e3f2fd;
+  font-weight: 600;
+}
+
+.remarks-content {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.remark-item {
+  padding: 15px;
+  background: #f8f9fa;
+  border-radius: 6px;
+  border-left: 4px solid #3498db;
+}
+
+.remark-item strong {
+  display: block;
+  margin-bottom: 8px;
+  color: #333;
+}
+
+.remark-item p {
+  margin: 0;
+  color: #666;
+  line-height: 1.6;
+}
+
+.actions-section {
+  margin-top: 30px;
+  text-align: center;
+}
+
+.btn {
+  padding: 12px 24px;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 16px;
+  font-weight: 600;
+  transition: all 0.3s ease;
+}
+
+.btn-primary {
+  background: #3498db;
+  color: white;
+}
+
+.btn-primary:hover:not(:disabled) {
+  background: #2980b9;
+}
+
+.btn-primary:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.btn-secondary {
+  background: #6c757d;
+  color: white;
+}
+
+.btn-secondary:hover {
+  background: #5a6268;
+}
+
+.btn-large {
+  padding: 15px 30px;
+  font-size: 18px;
+}
+
+.empty-state {
+  text-align: center;
+  padding: 40px;
+  background: white;
+  border-radius: 10px;
+  color: #666;
+}
+
+.grade-badge {
+  display: inline-block;
+  padding: 4px 12px;
+  border-radius: 4px;
+  font-weight: 600;
+  font-size: 14px;
+  text-transform: uppercase;
+}
+
+.grade-a {
+  background: #4caf50;
+  color: white;
+}
+
+.grade-b {
+  background: #8bc34a;
+  color: white;
+}
+
+.grade-c {
+  background: #ffc107;
+  color: #333;
+}
+
+.grade-d {
+  background: #ff9800;
+  color: white;
+}
+
+.grade-e {
+  background: #ff5722;
+  color: white;
+}
+
+.grade-f {
+  background: #f44336;
+  color: white;
+}
+
+.grade-na {
+  background: #e0e0e0;
+  color: #666;
+}
+
+.no-remarks {
+  font-style: italic;
+  color: #999;
+}
+
+@media (max-width: 768px) {
+  .info-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .subjects-table {
+    font-size: 14px;
+  }
+
+  .subjects-table th,
+  .subjects-table td {
+    padding: 8px;
+  }
+}
+

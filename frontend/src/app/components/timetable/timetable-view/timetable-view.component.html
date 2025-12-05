@@ -1,0 +1,220 @@
+<div class="timetable-view-container">
+  <div class="header">
+    <h2>Timetable Management</h2>
+    <p class="subtitle">Generate, view, and edit school timetables</p>
+  </div>
+
+  <div class="alert alert-danger" *ngIf="error" (click)="clearError()">
+    <pre class="error-message">{{ error }}</pre>
+  </div>
+
+  <div class="alert alert-success" *ngIf="success" (click)="clearSuccess()">
+    {{ success }}
+  </div>
+
+  <!-- Generate New Timetable -->
+  <div class="card generate-section">
+    <h3>Generate New Timetable</h3>
+    <div class="form-row">
+      <div class="form-group">
+        <label>Version Name</label>
+        <input type="text" class="form-control" [(ngModel)]="newVersionName" 
+               placeholder="e.g., Term 1 2024 Timetable">
+      </div>
+      <div class="form-group">
+        <label>Description (Optional)</label>
+        <input type="text" class="form-control" [(ngModel)]="newVersionDescription" 
+               placeholder="Additional notes">
+      </div>
+      <div class="form-group">
+        <label>&nbsp;</label>
+        <button class="btn btn-primary" (click)="generateTimetable()" [disabled]="generating">
+          <span *ngIf="generating">Generating...</span>
+          <span *ngIf="!generating">Generate Timetable</span>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Version Selection -->
+  <div class="card" *ngIf="versions.length > 0">
+    <h3>Select Timetable Version</h3>
+    <div class="version-list">
+      <div *ngFor="let version of versions" 
+           class="version-item" 
+           [class.active]="isVersionSelected(version.id)"
+           (click)="selectVersion(version.id)">
+        <div class="version-info">
+          <strong>{{ version.name }}</strong>
+          <span class="version-date">{{ version.createdAt | date:'short' }}</span>
+          <span class="badge" [class.badge-active]="version.isActive" 
+                [class.badge-inactive]="!version.isActive">
+            {{ version.isActive ? 'Active' : 'Inactive' }}
+          </span>
+        </div>
+        <div class="version-actions">
+          <button class="btn btn-sm btn-secondary" 
+                  *ngIf="!version.isActive"
+                  (click)="activateVersion(version.id); $event.stopPropagation()">
+            Activate
+          </button>
+          <button class="btn btn-sm btn-primary" 
+                  (click)="downloadConsolidatedPDF(version.id); $event.stopPropagation()">
+            Download PDF
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Timetable Display -->
+  <div class="card" *ngIf="selectedVersion && !loading">
+    <div class="timetable-header">
+      <h3>{{ selectedVersion.name }}</h3>
+      <div class="view-controls">
+        <select class="form-control" [(ngModel)]="viewMode" (change)="onViewModeChange()">
+          <option value="all">All (Consolidated)</option>
+          <option value="teacher">By Teacher</option>
+          <option value="class">By Class</option>
+        </select>
+        
+        <select *ngIf="viewMode === 'teacher'" class="form-control" 
+                [(ngModel)]="selectedTeacherId" (change)="loadSlots()">
+          <option value="">Select Teacher</option>
+          <option *ngFor="let teacher of teachers" [value]="teacher.id">
+            {{ teacher.firstName }} {{ teacher.lastName }}
+          </option>
+        </select>
+
+        <select *ngIf="viewMode === 'class'" class="form-control" 
+                [(ngModel)]="selectedClassId" (change)="loadSlots()">
+          <option value="">Select Class</option>
+          <option *ngFor="let class of classes" [value]="class.id">
+            {{ class.name }}
+          </option>
+        </select>
+
+        <!-- Download buttons -->
+        <button *ngIf="viewMode === 'all'" class="btn btn-primary" 
+                (click)="downloadConsolidatedPDF()">
+          📥 Download Consolidated PDF
+        </button>
+        <button *ngIf="viewMode === 'teacher' && selectedTeacherId" class="btn btn-primary" 
+                (click)="downloadTeacherPDF(selectedTeacherId)">
+          📥 Download Teacher PDF
+        </button>
+        <button *ngIf="viewMode === 'class' && selectedClassId" class="btn btn-primary" 
+                (click)="downloadClassPDF(selectedClassId)">
+          📥 Download Class PDF
+        </button>
+      </div>
+    </div>
+
+    <!-- Teacher/Class List for PDF Downloads -->
+    <div class="pdf-download-section" *ngIf="viewMode === 'teacher' && !selectedTeacherId">
+      <h4>Download Individual Teacher Timetables</h4>
+      <div class="download-list">
+        <div *ngFor="let teacher of teachers" class="download-item">
+          <span>{{ teacher.firstName }} {{ teacher.lastName }}</span>
+          <button class="btn btn-sm btn-primary" (click)="downloadTeacherPDF(teacher.id)">
+            📥 Download PDF
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <div class="pdf-download-section" *ngIf="viewMode === 'class' && !selectedClassId">
+      <h4>Download Individual Class Timetables</h4>
+      <div class="download-list">
+        <div *ngFor="let class of classes" class="download-item">
+          <span>{{ class.name }}</span>
+          <button class="btn btn-sm btn-primary" (click)="downloadClassPDF(class.id)">
+            📥 Download PDF
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Timetable Grid -->
+    <div class="timetable-grid-container" *ngIf="daysOfWeek.length > 0 && periods.length > 0">
+      <table class="timetable-table">
+        <thead>
+          <tr>
+            <th>Period</th>
+            <th *ngFor="let day of daysOfWeek">{{ day }}</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr *ngFor="let period of periods">
+            <td class="period-cell">Period {{ period }}</td>
+            <td *ngFor="let day of daysOfWeek" class="slot-cell" 
+                [class.has-slot]="getSlot(day, period).length > 0"
+                [class.editing]="isCellBeingEdited(day, period)">
+              <div *ngFor="let slot of getSlot(day, period)" class="slot-content">
+                <div class="slot-info" *ngIf="!isSlotBeingEdited(slot)">
+                  <div class="slot-teacher" *ngIf="viewMode !== 'teacher'">
+                    {{ slot.teacher?.firstName }} {{ slot.teacher?.lastName }}
+                  </div>
+                  <div class="slot-class" *ngIf="viewMode !== 'class'">
+                    {{ slot.class?.name }}
+                  </div>
+                  <div class="slot-subject">{{ slot.subject?.name }}</div>
+                  <div class="slot-room" *ngIf="slot.room">{{ slot.room }}</div>
+                  <div class="slot-actions">
+                    <button class="btn-icon" (click)="editSlot(slot); $event.stopPropagation()" 
+                            title="Edit">
+                      ✏️
+                    </button>
+                    <button class="btn-icon" (click)="deleteSlot(slot.id); $event.stopPropagation()" 
+                            title="Delete">
+                      🗑️
+                    </button>
+                  </div>
+                </div>
+                
+                <!-- Edit Form -->
+                <div class="slot-edit-form" *ngIf="isSlotBeingEdited(slot)">
+                  <select class="form-control form-control-sm" [(ngModel)]="editForm.teacherId">
+                    <option *ngFor="let teacher of teachers" [value]="teacher.id">
+                      {{ teacher.firstName }} {{ teacher.lastName }}
+                    </option>
+                  </select>
+                  <select class="form-control form-control-sm" [(ngModel)]="editForm.classId">
+                    <option *ngFor="let class of classes" [value]="class.id">
+                      {{ class.name }}
+                    </option>
+                  </select>
+                  <select class="form-control form-control-sm" [(ngModel)]="editForm.subjectId">
+                    <option *ngFor="let subject of subjects" [value]="subject.id">
+                      {{ subject.name }}
+                    </option>
+                  </select>
+                  <input type="text" class="form-control form-control-sm" 
+                         [(ngModel)]="editForm.room" placeholder="Room">
+                  <div class="edit-actions">
+                    <button class="btn btn-sm btn-primary" (click)="saveSlot(); $event.stopPropagation()">
+                      Save
+                    </button>
+                    <button class="btn btn-sm btn-secondary" (click)="cancelEdit(); $event.stopPropagation()">
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div *ngIf="daysOfWeek.length === 0 || periods.length === 0" class="no-data">
+      No timetable data available for this version.
+    </div>
+  </div>
+
+  <div class="loading-spinner" *ngIf="loading">
+    <div class="spinner"></div>
+    <p>Loading timetable...</p>
+  </div>
+</div>
+

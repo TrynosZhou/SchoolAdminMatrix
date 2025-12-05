@@ -1,0 +1,156 @@
+<div class="mark-input-progress-container">
+  <div class="header">
+    <h2>Mark Input Progress</h2>
+    <p class="subtitle">Track completion percentage of mark entry by stream and class</p>
+  </div>
+
+  <div class="filters-section">
+    <div class="filters-grid">
+      <div class="filter-group">
+        <label for="examSelect">Exam</label>
+        <select id="examSelect" [(ngModel)]="selectedExamId" class="form-control">
+          <option value="">All Exams</option>
+          <option *ngFor="let exam of exams" [value]="exam.id">
+            {{ exam.name }} ({{ exam.type }}) - {{ exam.term || 'N/A' }}
+          </option>
+        </select>
+      </div>
+
+      <div class="filter-group">
+        <label for="subjectSelect">Subject Name</label>
+        <select id="subjectSelect" [(ngModel)]="selectedSubjectId" (change)="onSubjectChange()" class="form-control">
+          <option value="">All Subjects</option>
+          <option *ngFor="let subject of subjects" [value]="subject.id">
+            {{ subject.name }}
+          </option>
+        </select>
+      </div>
+
+      <div class="filter-group">
+        <label for="subjectCodeSelect">Subject Code</label>
+        <select id="subjectCodeSelect" [(ngModel)]="selectedSubjectCode" (change)="onSubjectCodeChange()" class="form-control">
+          <option value="">All Subject Codes</option>
+          <option *ngFor="let subject of subjects" [value]="subject.code">
+            {{ subject.code }}
+          </option>
+        </select>
+      </div>
+
+      <div class="filter-group">
+        <label for="examTypeSelect">Exam Type</label>
+        <select id="examTypeSelect" [(ngModel)]="selectedExamType" class="form-control">
+          <option value="">All Types</option>
+          <option *ngFor="let type of examTypes" [value]="type.value">
+            {{ type.label }}
+          </option>
+        </select>
+      </div>
+
+      <div class="filter-group">
+        <label for="termInput">Term</label>
+        <input 
+          type="text" 
+          id="termInput" 
+          [(ngModel)]="selectedTerm" 
+          class="form-control" 
+          [placeholder]="selectedTerm || 'e.g., Term 1 2024'"
+          readonly>
+        <small class="form-text text-muted">Fetched from Settings (Active Term)</small>
+      </div>
+    </div>
+
+    <div class="filter-actions">
+      <button type="button" class="btn btn-primary" (click)="loadProgress()" [disabled]="loading">
+        <span *ngIf="loading">Loading...</span>
+        <span *ngIf="!loading">Load Progress</span>
+      </button>
+      <button type="button" class="btn btn-outline" (click)="resetFilters()">
+        Reset Filters
+      </button>
+    </div>
+  </div>
+
+  <div class="alert alert-danger" *ngIf="error">
+    {{ error }}
+  </div>
+
+  <div class="progress-dashboard" *ngIf="progressData">
+    <div class="dashboard-header">
+      <h3>Progress Dashboard</h3>
+      <div class="filters-info" *ngIf="progressData.filters">
+        <span *ngIf="progressData.filters.examId">Exam: Selected | </span>
+        <span *ngIf="progressData.filters.subjectId">Subject: Selected | </span>
+        <span *ngIf="progressData.filters.term">Term: {{ progressData.filters.term }} | </span>
+        <span *ngIf="progressData.filters.examType">Type: {{ progressData.filters.examType }}</span>
+      </div>
+    </div>
+
+    <div class="streams-container" *ngIf="progressData.progress && progressData.progress.length > 0">
+      <div class="stream-card" *ngFor="let stream of progressData.progress">
+        <div class="stream-header">
+          <h4>{{ stream.stream }}</h4>
+          <div class="stream-summary">
+            <span class="summary-item">
+              <strong>Total Students:</strong> {{ stream.streamTotal }}
+            </span>
+            <span class="summary-item">
+              <strong>With Marks:</strong> {{ stream.streamWithMarks }}
+            </span>
+            <span class="summary-item completion">
+              <strong>Completion:</strong> {{ stream.streamCompletionPercentage }}%
+            </span>
+          </div>
+        </div>
+
+        <div class="stream-progress-bar">
+          <div 
+            class="progress-fill" 
+            [style.width]="getProgressWidth(stream.streamCompletionPercentage)"
+            [style.background-color]="getProgressColor(stream.streamCompletionPercentage)">
+          </div>
+        </div>
+
+        <div class="classes-grid">
+          <div class="class-card" *ngFor="let classData of stream.classes">
+            <div class="class-header">
+              <h5>{{ classData.className }}</h5>
+              <span class="class-completion">{{ classData.completionPercentage }}%</span>
+            </div>
+            
+            <div class="class-progress-bar">
+              <div 
+                class="progress-fill" 
+                [style.width]="getProgressWidth(classData.completionPercentage)"
+                [style.background-color]="getProgressColor(classData.completionPercentage)">
+              </div>
+            </div>
+
+            <div class="class-stats">
+              <div class="stat-item">
+                <span class="stat-label">Total:</span>
+                <span class="stat-value">{{ classData.totalStudents }}</span>
+              </div>
+              <div class="stat-item">
+                <span class="stat-label">With Marks:</span>
+                <span class="stat-value">{{ classData.studentsWithMarks }}</span>
+              </div>
+              <div class="stat-item">
+                <span class="stat-label">Remaining:</span>
+                <span class="stat-value">{{ classData.totalStudents - classData.studentsWithMarks }}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="no-data" *ngIf="!progressData.progress || progressData.progress.length === 0">
+      <p>No progress data available for the selected filters.</p>
+    </div>
+  </div>
+
+  <div class="empty-state" *ngIf="!progressData && !loading">
+    <p>Select filters and click "Load Progress" to view mark input progress.</p>
+  </div>
+</div>
+

@@ -95,7 +95,8 @@ export class TeacherListComponent implements OnInit {
   loadClasses() {
     this.classService.getClasses().subscribe({
       next: (data: any) => {
-        this.allClasses = data || [];
+        const classesList = Array.isArray(data) ? data : (data?.data || []);
+        this.allClasses = this.classService.sortClasses(classesList);
       },
       error: (err: any) => {
         console.error('Error loading classes:', err);

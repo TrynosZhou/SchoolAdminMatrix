@@ -1,0 +1,99 @@
+<div class="student-invoice-statement-container">
+  <div class="page-header">
+    <div class="header-content">
+      <button class="btn btn-secondary" (click)="goBack()">← Back to Dashboard</button>
+      <h1>My Invoice Statement</h1>
+      <p class="subtitle">Current Invoice Balance and Payment Information</p>
+    </div>
+  </div>
+
+  <div class="alert alert-error" *ngIf="error">{{ error }}</div>
+
+  <div *ngIf="loading" class="loading-container">
+    <p>Loading invoice information...</p>
+  </div>
+
+  <div *ngIf="!loading && invoiceBalance" class="invoice-content">
+    <!-- Student Information -->
+    <div class="info-section">
+      <h2>Student Information</h2>
+      <div class="info-grid">
+        <div class="info-item">
+          <span class="label">Name:</span>
+          <span class="value">{{ invoiceBalance.fullName || (invoiceBalance.firstName + ' ' + invoiceBalance.lastName) }}</span>
+        </div>
+        <div class="info-item">
+          <span class="label">Student ID:</span>
+          <span class="value">{{ invoiceBalance.studentNumber }}</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Current Balance -->
+    <div class="balance-section">
+      <h2>Current Balance</h2>
+      <div class="balance-display">
+        <div class="balance-label">Outstanding Balance</div>
+        <div class="balance-amount" [class.positive]="invoiceBalance.balance > 0" [class.zero]="invoiceBalance.balance === 0">
+          {{ formatCurrency(invoiceBalance.balance || 0) }}
+        </div>
+        <div class="balance-note" *ngIf="invoiceBalance.balance > 0">
+          Please clear your outstanding balance to continue accessing services.
+        </div>
+        <div class="balance-note" *ngIf="invoiceBalance.balance === 0">
+          Your account is up to date. No outstanding balance.
+        </div>
+        <div class="balance-note" *ngIf="invoiceBalance.prepaidAmount > 0">
+          Prepaid Amount: {{ formatCurrency(invoiceBalance.prepaidAmount) }}
+        </div>
+      </div>
+    </div>
+
+    <!-- Last Invoice Details -->
+    <div class="invoice-details-section" *ngIf="invoiceBalance.lastInvoiceId">
+      <h2>Last Invoice Details</h2>
+      <div class="details-grid">
+        <div class="detail-item">
+          <span class="label">Invoice Number:</span>
+          <span class="value">{{ invoiceBalance.lastInvoiceNumber || '-' }}</span>
+        </div>
+        <div class="detail-item">
+          <span class="label">Term:</span>
+          <span class="value">{{ invoiceBalance.lastInvoiceTerm || '-' }}</span>
+        </div>
+        <div class="detail-item">
+          <span class="label">Invoice Date:</span>
+          <span class="value">{{ formatDate(invoiceBalance.lastInvoiceDate) }}</span>
+        </div>
+        <div class="detail-item">
+          <span class="label">Invoice Amount:</span>
+          <span class="value">{{ formatCurrency(invoiceBalance.lastInvoiceAmount || 0) }}</span>
+        </div>
+        <div class="detail-item">
+          <span class="label">Previous Balance:</span>
+          <span class="value">{{ formatCurrency(invoiceBalance.lastInvoicePreviousBalance || 0) }}</span>
+        </div>
+        <div class="detail-item">
+          <span class="label">Amount Paid:</span>
+          <span class="value">{{ formatCurrency(invoiceBalance.lastInvoicePaidAmount || 0) }}</span>
+        </div>
+        <div class="detail-item">
+          <span class="label">Current Balance:</span>
+          <span class="value">{{ formatCurrency(invoiceBalance.lastInvoiceBalance || 0) }}</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Download Button -->
+    <div class="actions-section">
+      <button class="btn btn-primary btn-large" (click)="downloadPDF()" [disabled]="loading || !invoiceBalance.lastInvoiceId">
+        {{ loading ? 'Downloading...' : '📥 Download Invoice PDF' }}
+      </button>
+    </div>
+  </div>
+
+  <div *ngIf="!loading && !invoiceBalance && !error" class="empty-state">
+    <p>No invoice information available.</p>
+  </div>
+</div>
+

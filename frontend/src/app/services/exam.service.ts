@@ -121,10 +121,9 @@ export class ExamService {
     return this.http.delete(`${this.apiUrl}/exams/all`);
   }
 
-  generateMarkSheet(classId: string, examType: string, term?: string, subjectId?: string): Observable<any> {
+  generateMarkSheet(classId: string, examType: string, term?: string): Observable<any> {
     const params: any = { classId, examType };
     if (term) params.term = term;
-    if (subjectId) params.subjectId = subjectId;
     return this.http.get(`${this.apiUrl}/exams/mark-sheet`, { params });
   }
 
@@ -144,6 +143,43 @@ export class ExamService {
 
   publishExamByType(examType: string, term: string): Observable<any> {
     return this.http.post(`${this.apiUrl}/exams/publish-by-type`, { examType, term });
+  }
+
+  moderateMarks(classId: string, subjectId: string, examType: string, targetMin?: number, targetMax?: number): Observable<any> {
+    const body: any = { classId, subjectId, examType };
+    if (targetMin !== undefined) body.targetMin = targetMin;
+    if (targetMax !== undefined) body.targetMax = targetMax;
+    return this.http.post(`${this.apiUrl}/exams/moderate-marks`, body);
+  }
+
+  saveModeratedMarks(classId: string, subjectId: string, examType: string, moderatedResults: any[]): Observable<any> {
+    const body = { classId, subjectId, examType, moderatedResults };
+    return this.http.post(`${this.apiUrl}/exams/save-moderated-marks`, body);
+  }
+
+  getMarkInputProgress(examId?: string, subjectId?: string, term?: string, examType?: string): Observable<any> {
+    const params: any = {};
+    if (examId) params.examId = examId;
+    if (subjectId) params.subjectId = subjectId;
+    if (term) params.term = term;
+    if (examType) params.examType = examType;
+    return this.http.get(`${this.apiUrl}/exams/mark-input-progress`, { params });
+  }
+
+  generateAIRemark(studentId: string, subjectId: string, score: number, maxScore: number = 100): Observable<any> {
+    console.log('Calling AI remark generation API:', {
+      url: `${this.apiUrl}/exams/generate-ai-remark`,
+      studentId,
+      subjectId,
+      score,
+      maxScore
+    });
+    return this.http.post(`${this.apiUrl}/exams/generate-ai-remark`, {
+      studentId,
+      subjectId,
+      score,
+      maxScore
+    });
   }
 }
 

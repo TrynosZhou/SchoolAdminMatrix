@@ -68,7 +68,9 @@ export class EnrollStudentComponent implements OnInit {
   loadClasses() {
     this.classService.getClasses().subscribe({
       next: (data: any) => {
-        this.classes = (data || []).filter((c: any) => c.isActive !== false);
+        const classesList = Array.isArray(data) ? data : (data?.data || []);
+        const activeClasses = classesList.filter((c: any) => c.isActive !== false);
+        this.classes = this.classService.sortClasses(activeClasses);
       },
       error: (err: any) => {
         console.error('Error loading classes:', err);

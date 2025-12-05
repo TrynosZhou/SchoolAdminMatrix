@@ -101,7 +101,10 @@ export class ExamFormComponent implements OnInit {
 
   loadClasses() {
     this.classService.getClasses().subscribe({
-      next: (data: any) => this.classes = data,
+      next: (data: any) => {
+        const classesList = Array.isArray(data) ? data : (data?.data || []);
+        this.classes = this.classService.sortClasses(classesList);
+      },
       error: (err: any) => console.error(err)
     });
   }

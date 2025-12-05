@@ -19,11 +19,15 @@ import { MarksEntryComponent } from './components/exams/marks-entry/marks-entry.
 import { ReportCardComponent } from './components/exams/report-card/report-card.component';
 import { RankingsComponent } from './components/exams/rankings/rankings.component';
 import { MarkSheetComponent } from './components/exams/mark-sheet/mark-sheet.component';
+import { ModerateMarkComponent } from './components/exams/moderate-mark/moderate-mark.component';
+import { MarkInputProgressComponent } from './components/exams/mark-input-progress/mark-input-progress.component';
+import { PublishResultsComponent } from './components/exams/publish-results/publish-results.component';
 import { InvoiceListComponent } from './components/finance/invoice-list/invoice-list.component';
 import { InvoiceFormComponent } from './components/finance/invoice-form/invoice-form.component';
 import { InvoiceStatementsComponent } from './components/finance/invoice-statements/invoice-statements.component';
 import { ClassListComponent } from './components/classes/class-list/class-list.component';
 import { ClassFormComponent } from './components/classes/class-form/class-form.component';
+import { ClassListsComponent } from './components/classes/class-lists/class-lists.component';
 import { SubjectListComponent } from './components/subjects/subject-list/subject-list.component';
 import { SubjectFormComponent } from './components/subjects/subject-form/subject-form.component';
 import { SettingsComponent } from './components/settings/settings.component';
@@ -49,7 +53,13 @@ import { EnrollStudentComponent } from './components/enrollments/enroll-student/
 import { UnenrolledStudentsComponent } from './components/enrollments/unenrolled-students/unenrolled-students.component';
 import { DHServicesReportComponent } from './components/reports/dh-services-report/dh-services-report.component';
 import { TransportServicesReportComponent } from './components/reports/transport-services-report/transport-services-report.component';
+import { StudentIdCardsComponent } from './components/reports/student-id-cards/student-id-cards.component';
 import { SplashComponent } from './components/splash/splash.component';
+import { TimetableConfigComponent } from './components/timetable/timetable-config/timetable-config.component';
+import { TimetableViewComponent } from './components/timetable/timetable-view/timetable-view.component';
+import { StudentDashboardComponent } from './components/student/student-dashboard/student-dashboard.component';
+import { StudentReportCardComponent } from './components/student/student-report-card/student-report-card.component';
+import { StudentInvoiceStatementComponent } from './components/student/student-invoice-statement/student-invoice-statement.component';
 
 @NgModule({
   declarations: [
@@ -66,12 +76,16 @@ import { SplashComponent } from './components/splash/splash.component';
     MarksEntryComponent,
     ReportCardComponent,
     MarkSheetComponent,
+    ModerateMarkComponent,
+    MarkInputProgressComponent,
+    PublishResultsComponent,
     RankingsComponent,
     InvoiceListComponent,
     InvoiceFormComponent,
     InvoiceStatementsComponent,
     ClassListComponent,
     ClassFormComponent,
+    ClassListsComponent,
     SubjectListComponent,
     SubjectFormComponent,
     SettingsComponent,
@@ -96,7 +110,13 @@ import { SplashComponent } from './components/splash/splash.component';
     UnenrolledStudentsComponent,
     DHServicesReportComponent,
     TransportServicesReportComponent,
-    SplashComponent
+    StudentIdCardsComponent,
+    SplashComponent,
+    TimetableConfigComponent,
+    TimetableViewComponent,
+    StudentDashboardComponent,
+    StudentReportCardComponent,
+    StudentInvoiceStatementComponent
   ],
   imports: [
     BrowserModule,

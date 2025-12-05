@@ -79,8 +79,9 @@ export class StudentFormComponent implements OnInit {
   loadClasses() {
     this.classService.getClasses().subscribe({
       next: (data: any) => {
-        this.classes = data;
-        this.filteredClasses = data;
+        const classesList = Array.isArray(data) ? data : (data?.data || []);
+        this.classes = this.classService.sortClasses(classesList);
+        this.filteredClasses = [...this.classes];
       },
       error: (err: any) => {
         console.error('Error loading classes:', err);

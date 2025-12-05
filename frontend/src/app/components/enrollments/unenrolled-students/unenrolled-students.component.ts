@@ -11,9 +11,17 @@ import { StudentService } from '../../../services/student.service';
 export class UnenrolledStudentsComponent implements OnInit {
   students: any[] = [];
   filteredStudents: any[] = [];
+  paginatedStudents: any[] = [];
   loading = false;
   error = '';
   searchQuery = '';
+  pagination = {
+    page: 1,
+    limit: 20,
+    total: 0,
+    totalPages: 1
+  };
+  pageSizeOptions = [10, 20, 50, 100];
 
   constructor(
     private enrollmentService: EnrollmentService,
@@ -33,6 +41,10 @@ export class UnenrolledStudentsComponent implements OnInit {
       next: (data: any) => {
         this.students = data || [];
         this.filteredStudents = this.students;
+        this.pagination.total = this.filteredStudents.length;
+        this.pagination.totalPages = Math.ceil(this.pagination.total / this.pagination.limit);
+        this.pagination.page = 1;
+        this.updatePaginatedStudents();
         this.loading = false;
       },
       error: (err: any) => {
@@ -41,6 +53,10 @@ export class UnenrolledStudentsComponent implements OnInit {
           next: (data: any) => {
             this.students = data || [];
             this.filteredStudents = this.students;
+            this.pagination.total = this.filteredStudents.length;
+            this.pagination.totalPages = Math.ceil(this.pagination.total / this.pagination.limit);
+            this.pagination.page = 1;
+            this.updatePaginatedStudents();
             this.loading = false;
           },
           error: (err2: any) => {
@@ -57,15 +73,43 @@ export class UnenrolledStudentsComponent implements OnInit {
   filterStudents() {
     if (!this.searchQuery.trim()) {
       this.filteredStudents = this.students;
+    } else {
+      const query = this.searchQuery.toLowerCase();
+      this.filteredStudents = this.students.filter((s: any) =>
+        s.studentNumber?.toLowerCase().includes(query) ||
+        s.firstName?.toLowerCase().includes(query) ||
+        s.lastName?.toLowerCase().includes(query) ||
+        `${s.firstName} ${s.lastName}`.toLowerCase().includes(query)
+      );
+    }
+    this.pagination.total = this.filteredStudents.length;
+    this.pagination.totalPages = Math.ceil(this.pagination.total / this.pagination.limit);
+    this.pagination.page = 1;
+    this.updatePaginatedStudents();
+  }
+
+  updatePaginatedStudents() {
+    const start = (this.pagination.page - 1) * this.pagination.limit;
+    const end = start + this.pagination.limit;
+    this.paginatedStudents = this.filteredStudents.slice(start, end);
+  }
+
+  changePage(page: number) {
+    if (page < 1 || page > this.pagination.totalPages || page === this.pagination.page) {
       return;
     }
-    const query = this.searchQuery.toLowerCase();
-    this.filteredStudents = this.students.filter((s: any) =>
-      s.studentNumber?.toLowerCase().includes(query) ||
-      s.firstName?.toLowerCase().includes(query) ||
-      s.lastName?.toLowerCase().includes(query) ||
-      `${s.firstName} ${s.lastName}`.toLowerCase().includes(query)
-    );
+    this.pagination.page = page;
+    this.updatePaginatedStudents();
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+
+  changePageSize(limit: string | number) {
+    const parsedLimit = typeof limit === 'string' ? parseInt(limit, 10) : limit;
+    if (!parsedLimit || parsedLimit === this.pagination.limit) return;
+    this.pagination.limit = parsedLimit;
+    this.pagination.totalPages = Math.ceil(this.pagination.total / this.pagination.limit);
+    this.pagination.page = 1;
+    this.updatePaginatedStudents();
   }
 
   enrollStudent(studentId: string) {

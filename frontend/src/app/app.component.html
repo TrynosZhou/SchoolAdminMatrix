@@ -30,13 +30,34 @@
   <div class="sidebar-content">
     <nav class="sidebar-nav">
       <!-- Dashboard -->
-      <a routerLink="/dashboard" routerLinkActive="active" class="sidebar-item">
+      <a routerLink="/dashboard" routerLinkActive="active" class="sidebar-item" *ngIf="!isStudent()">
+        <span class="sidebar-icon">🏠</span>
+        <span class="sidebar-text">Dashboard</span>
+      </a>
+      <a routerLink="/student/dashboard" routerLinkActive="active" class="sidebar-item" *ngIf="isStudent()">
         <span class="sidebar-icon">🏠</span>
         <span class="sidebar-text">Dashboard</span>
       </a>
 
+      <!-- Student Portal Menu -->
+      <div class="sidebar-menu" *ngIf="isStudent()">
+        <div class="sidebar-menu-header" (click)="toggleMenu('studentPortal')">
+          <span class="sidebar-icon">🎓</span>
+          <span class="sidebar-text">Student Portal</span>
+          <span class="sidebar-arrow" [class.expanded]="isMenuExpanded('studentPortal')">▼</span>
+        </div>
+        <div class="sidebar-submenu" [class.expanded]="isMenuExpanded('studentPortal')">
+          <a routerLink="/student/report-card" routerLinkActive="active" class="sidebar-subitem">
+            <span class="sidebar-text">My Report Card</span>
+          </a>
+          <a routerLink="/student/invoice-statement" routerLinkActive="active" class="sidebar-subitem">
+            <span class="sidebar-text">My Invoice Statement</span>
+          </a>
+        </div>
+      </div>
+
       <!-- Student Management -->
-      <div class="sidebar-menu" *ngIf="canAccessModule('students') || isAdmin() || isSuperAdmin()">
+      <div class="sidebar-menu" *ngIf="(canAccessModule('students') || isAdmin() || isSuperAdmin()) && !isStudent()">
         <div class="sidebar-menu-header" (click)="toggleMenu('studentManagement')">
           <span class="sidebar-icon">👨‍🎓</span>
           <span class="sidebar-text">Student Management</span>
@@ -62,7 +83,7 @@
       </div>
 
       <!-- Teacher Management -->
-      <div class="sidebar-menu" *ngIf="isAdmin() || isSuperAdmin()">
+      <div class="sidebar-menu" *ngIf="(isAdmin() || isSuperAdmin()) && !isStudent()">
         <div class="sidebar-menu-header" (click)="toggleMenu('teacherManagement')">
           <span class="sidebar-icon">👨‍🏫</span>
           <span class="sidebar-text">Teacher Management</span>
@@ -88,15 +109,18 @@
       </div>
 
       <!-- Class Management -->
-      <div class="sidebar-menu" *ngIf="isAdmin() || isSuperAdmin()">
+      <div class="sidebar-menu" *ngIf="(isAdmin() || isSuperAdmin() || isTeacher()) && !isStudent()">
         <div class="sidebar-menu-header" (click)="toggleMenu('classManagement')">
           <span class="sidebar-icon">🏫</span>
           <span class="sidebar-text">Class Management</span>
           <span class="sidebar-arrow" [class.expanded]="isMenuExpanded('classManagement')">▼</span>
         </div>
         <div class="sidebar-submenu" [class.expanded]="isMenuExpanded('classManagement')">
-          <a routerLink="/classes" routerLinkActive="active" class="sidebar-subitem">
+          <a routerLink="/classes" routerLinkActive="active" class="sidebar-subitem" *ngIf="isAdmin() || isSuperAdmin()">
             <span class="sidebar-text">Manage Classes</span>
+          </a>
+          <a routerLink="/classes/lists" routerLinkActive="active" class="sidebar-subitem" *ngIf="isAdmin() || isSuperAdmin() || isTeacher()">
+            <span class="sidebar-text">Class Lists</span>
           </a>
           <a routerLink="/attendance/mark" routerLinkActive="active" class="sidebar-subitem" *ngIf="canAccessModule('attendance') || isAdmin() || isSuperAdmin()">
             <span class="sidebar-text">Mark Attendance</span>
@@ -105,7 +129,7 @@
       </div>
 
       <!-- Subject Management -->
-      <div class="sidebar-menu" *ngIf="isAdmin() || isSuperAdmin()">
+      <div class="sidebar-menu" *ngIf="(isAdmin() || isSuperAdmin()) && !isStudent()">
         <div class="sidebar-menu-header" (click)="toggleMenu('subjectManagement')">
           <span class="sidebar-icon">📚</span>
           <span class="sidebar-text">Subject Management</span>
@@ -119,7 +143,7 @@
       </div>
 
       <!-- Exam Management -->
-      <div class="sidebar-menu" *ngIf="canAccessModule('exams') || isAdmin() || isSuperAdmin()">
+      <div class="sidebar-menu" *ngIf="(canAccessModule('exams') || isAdmin() || isSuperAdmin()) && !isStudent()">
         <div class="sidebar-menu-header" (click)="toggleMenu('examManagement')">
           <span class="sidebar-icon">📝</span>
           <span class="sidebar-text">Exam Management</span>
@@ -132,14 +156,40 @@
           <a routerLink="/mark-sheet" routerLinkActive="active" class="sidebar-subitem" *ngIf="canAccessModule('exams') || isAdmin() || isSuperAdmin()">
             <span class="sidebar-text">Mark Sheets</span>
           </a>
-          <a routerLink="/rankings" routerLinkActive="active" class="sidebar-subitem" *ngIf="canAccessModule('rankings') || isAdmin() || isSuperAdmin()">
-            <span class="sidebar-text">Rankings</span>
+          <a routerLink="/exams/moderate-mark" routerLinkActive="active" class="sidebar-subitem" *ngIf="isAdmin() || isSuperAdmin()">
+            <span class="sidebar-text">Moderate Mark</span>
+          </a>
+          <a routerLink="/exams/mark-input-progress" routerLinkActive="active" class="sidebar-subitem" *ngIf="isAdmin() || isSuperAdmin()">
+            <span class="sidebar-text">Mark Input Progress</span>
+          </a>
+        <a routerLink="/rankings" routerLinkActive="active" class="sidebar-subitem" *ngIf="canAccessModule('rankings') || isAdmin() || isSuperAdmin()">
+          <span class="sidebar-text">Rankings</span>
+        </a>
+        <a routerLink="/publish-results" routerLinkActive="active" class="sidebar-subitem" *ngIf="isAdmin() || isSuperAdmin()">
+          <span class="sidebar-text">Publish Results</span>
+        </a>
+      </div>
+    </div>
+
+      <!-- Timetable Management -->
+      <div class="sidebar-menu" *ngIf="(isAdmin() || isSuperAdmin()) && !isStudent()">
+        <div class="sidebar-menu-header" (click)="toggleMenu('timetableManagement')">
+          <span class="sidebar-icon">📅</span>
+          <span class="sidebar-text">Timetable Management</span>
+          <span class="sidebar-arrow" [class.expanded]="isMenuExpanded('timetableManagement')">▼</span>
+        </div>
+        <div class="sidebar-submenu" [class.expanded]="isMenuExpanded('timetableManagement')">
+          <a routerLink="/timetable" routerLinkActive="active" class="sidebar-subitem">
+            <span class="sidebar-text">View Timetable</span>
+          </a>
+          <a routerLink="/timetable/config" routerLinkActive="active" class="sidebar-subitem">
+            <span class="sidebar-text">Configuration</span>
           </a>
         </div>
       </div>
 
       <!-- Finance Management -->
-      <div class="sidebar-menu" *ngIf="canAccessModule('finance')">
+      <div class="sidebar-menu" *ngIf="canAccessModule('finance') && !isStudent()">
         <div class="sidebar-menu-header" (click)="toggleMenu('financeManagement')">
           <span class="sidebar-icon">💰</span>
           <span class="sidebar-text">Finance Management</span>
@@ -159,7 +209,7 @@
       </div>
 
       <!-- Reports -->
-      <div class="sidebar-menu" *ngIf="canAccessModule('reportCards') || canAccessModule('attendance') || isAdmin() || isSuperAdmin()">
+      <div class="sidebar-menu" *ngIf="(canAccessModule('reportCards') || canAccessModule('attendance') || isAdmin() || isSuperAdmin()) && !isStudent()">
         <div class="sidebar-menu-header" (click)="toggleMenu('reports')">
           <span class="sidebar-icon">📊</span>
           <span class="sidebar-text">Reports</span>
@@ -178,11 +228,14 @@
           <a routerLink="/reports/transport-services" routerLinkActive="active" class="sidebar-subitem" *ngIf="isAdmin() || isSuperAdmin()">
             <span class="sidebar-text">Transport Services</span>
           </a>
+          <a routerLink="/reports/student-id-cards" routerLinkActive="active" class="sidebar-subitem" *ngIf="isAdmin() || isSuperAdmin()">
+            <span class="sidebar-text">Student ID Cards</span>
+          </a>
         </div>
       </div>
 
       <!-- Record Keeping (Teachers only) -->
-      <div class="sidebar-menu" *ngIf="isTeacher() && canAccessModule('recordBook')">
+      <div class="sidebar-menu" *ngIf="isTeacher() && canAccessModule('recordBook') && !isStudent()">
         <div class="sidebar-menu-header" (click)="toggleMenu('recordKeeping')">
           <span class="sidebar-icon">📝</span>
           <span class="sidebar-text">Record Keeping</span>
@@ -200,7 +253,7 @@
 
 
       <!-- General Settings -->
-      <div class="sidebar-menu" *ngIf="canAccessModule('settings') || isAdmin() || isSuperAdmin()">
+      <div class="sidebar-menu" *ngIf="(canAccessModule('settings') || isAdmin() || isSuperAdmin()) && !isStudent()">
         <div class="sidebar-menu-header" (click)="toggleMenu('settings')">
           <span class="sidebar-icon">⚙️</span>
           <span class="sidebar-text">General Settings</span>

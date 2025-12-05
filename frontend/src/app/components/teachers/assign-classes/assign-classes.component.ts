@@ -55,7 +55,9 @@ export class AssignClassesComponent implements OnInit {
   loadClasses() {
     this.classService.getClasses().subscribe({
       next: (data: any) => {
-        this.availableClasses = (data || []).filter((c: any) => c.isActive !== false);
+        const classesList = Array.isArray(data) ? data : (data?.data || []);
+        const activeClasses = classesList.filter((c: any) => c.isActive !== false);
+        this.availableClasses = this.classService.sortClasses(activeClasses);
       },
       error: (err: any) => {
         console.error('Error loading classes:', err);
@@ -94,7 +96,8 @@ export class AssignClassesComponent implements OnInit {
     this.error = '';
     this.teacherService.getTeacherClasses(this.selectedTeacher.id).subscribe({
       next: (response: any) => {
-        this.teacherClasses = response.classes || [];
+        const classesList = response.classes || [];
+        this.teacherClasses = this.classService.sortClasses(classesList);
         this.selectedClassIds = this.teacherClasses.map((c: any) => c.id);
         this.loading = false;
       },

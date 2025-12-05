@@ -152,7 +152,8 @@ export class RecordBookComponent implements OnInit {
     // Use the new endpoint to fetch classes from junction table
     this.teacherService.getTeacherClasses(teacherId).subscribe({
       next: (response: any) => {
-        this.teacherClasses = response.classes || [];
+        const classesList = response.classes || [];
+        this.teacherClasses = this.classService.sortClasses(classesList);
         this.loading = false;
         
         console.log('Assigned classes loaded:', this.teacherClasses.length);
@@ -166,7 +167,8 @@ export class RecordBookComponent implements OnInit {
         
         // Fallback: try to get classes from teacher object if available
         if (this.teacher && this.teacher.classes) {
-          this.teacherClasses = this.teacher.classes || [];
+          const fallbackClasses = this.teacher.classes || [];
+          this.teacherClasses = this.classService.sortClasses(fallbackClasses);
           console.log('Using fallback classes from teacher object:', this.teacherClasses.length);
         } else {
           this.teacherClasses = [];

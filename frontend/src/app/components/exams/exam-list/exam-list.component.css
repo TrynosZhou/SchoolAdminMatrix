@@ -129,6 +129,31 @@
   margin-bottom: 25px;
 }
 
+.form-row-single {
+  display: grid;
+  grid-template-columns: 1.2fr 1fr 1.5fr 0.8fr;
+  gap: 12px;
+  margin-bottom: 20px;
+}
+
+.form-row-single .form-group {
+  margin-bottom: 0;
+}
+
+.form-row-single .form-group small {
+  display: block;
+  margin-top: 4px;
+  font-size: 11px;
+  color: #666;
+}
+
+.form-row-single .term-input {
+  font-size: 13px;
+  padding: 8px 10px;
+  background-color: #f5f5f5;
+  cursor: not-allowed;
+}
+
 .form-group {
   margin-bottom: 0;
 }
@@ -148,13 +173,18 @@
 
 .form-control {
   width: 100%;
-  padding: 12px 16px;
+  padding: 8px 10px;
   border: 2px solid #e9ecef;
   border-radius: 8px;
-  font-size: 14px;
+  font-size: 13px;
   transition: all 0.3s ease;
   font-family: inherit;
   background: #fff;
+}
+
+.form-row-single .form-control {
+  padding: 8px 10px;
+  font-size: 13px;
 }
 
 .form-control:focus {
@@ -375,6 +405,75 @@
   text-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
 }
 
+/* Marks Progress Indicator - Matching Image Style */
+.marks-progress-container {
+  width: 100%;
+  margin-top: 20px;
+  position: relative;
+}
+
+.progress-line-top {
+  width: 100%;
+  height: 3px;
+  background: linear-gradient(90deg, 
+    #1e3a8a 0%, 
+    #3b82f6 25%, 
+    #6b21a8 100%);
+  border-radius: 2px;
+  margin-bottom: 8px;
+  position: relative;
+  overflow: hidden;
+}
+
+.progress-line-top::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 100%;
+  width: var(--progress-width, 0%);
+  background: linear-gradient(90deg, 
+    #1e3a8a 0%, 
+    #3b82f6 25%, 
+    #10b981 100%);
+  transition: width 0.3s ease;
+  border-radius: 2px;
+}
+
+.progress-bar-main {
+  width: 100%;
+  min-height: 60px;
+  background: linear-gradient(90deg, 
+    #a5b4fc 0%, 
+    #8b5cf6 50%, 
+    #6b21a8 100%);
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 12px 20px;
+  position: relative;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+.progress-label-box {
+  background: white;
+  border: 2px solid #10b981;
+  border-radius: 8px;
+  padding: 10px 20px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.progress-label-text {
+  color: #059669;
+  font-size: 15px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
 /* Table Controls */
 .table-controls {
   display: flex;
@@ -489,8 +588,8 @@
 }
 
 .marks-input {
-  width: 100px;
-  padding: 8px 12px;
+  width: 94px; /* Increased by 20% from 78px (78px × 1.20 = 93.6px, rounded to 94px) */
+  padding: 8px 30px 8px 12px; /* Right padding for status indicator */
   border: 2px solid #e9ecef;
   border-radius: 6px;
   font-size: 14px;
@@ -510,9 +609,20 @@
   font-weight: 500;
 }
 
+.remarks-wrapper {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.remarks-container {
+  position: relative;
+  flex: 1;
+}
+
 .remarks-input {
   width: 100%;
-  padding: 8px 12px;
+  padding: 8px 30px 8px 12px; /* Right padding for status indicator */
   border: 2px solid #e9ecef;
   border-radius: 6px;
   font-size: 12px;
@@ -525,6 +635,133 @@
   outline: none;
   border-color: #667eea;
   box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+}
+
+.ai-generating-indicator {
+  position: absolute;
+  top: 6px;
+  right: 8px; /* Position inside the textarea */
+  font-size: 11px;
+  font-weight: 500;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  pointer-events: none;
+  z-index: 10;
+  color: #667eea;
+  background: rgba(102, 126, 234, 0.1);
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+.ai-generating-indicator .ai-text {
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+}
+
+.save-status-indicator {
+  position: absolute;
+  top: 6px;
+  right: 8px; /* Position inside the textarea */
+  font-size: 11px;
+  font-weight: 500;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  pointer-events: none;
+  z-index: 10;
+}
+
+.save-status-indicator-mark {
+  position: absolute;
+  top: 50%;
+  right: 50px; /* Position inside the input, to the left of "/ 100" */
+  transform: translateY(-50%);
+  font-size: 11px;
+  font-weight: 500;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  pointer-events: none;
+  z-index: 10;
+}
+
+.cancel-student-btn {
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  font-size: 14px;
+  padding: 4px 6px;
+  border-radius: 4px;
+  transition: all 0.2s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0.6;
+  width: 24px;
+  height: 24px;
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+.cancel-student-btn:hover:not(:disabled) {
+  opacity: 1;
+  background: rgba(108, 117, 125, 0.1);
+  transform: scale(1.1);
+}
+
+.cancel-student-btn:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+
+.delete-mark-btn:hover:not(:disabled) {
+  opacity: 1;
+  background: rgba(239, 68, 68, 0.1);
+  transform: scale(1.1);
+}
+
+.delete-mark-btn:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+
+.saving-indicator {
+  color: #667eea;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.saved-indicator {
+  color: #10b981;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.error-indicator {
+  color: #ef4444;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.spinner-small {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border: 2px solid #e9ecef;
+  border-top-color: #667eea;
+  border-radius: 50%;
+  animation: spin 0.6s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .status-cell {
@@ -657,6 +894,11 @@
 
   .form-grid {
     grid-template-columns: 1fr;
+  }
+
+  .form-row-single {
+    grid-template-columns: 1fr;
+    gap: 15px;
   }
 
   .summary-content {

@@ -15,6 +15,7 @@ import { Attendance, AttendanceStatus } from '../entities/Attendance';
 import { AuthRequest } from '../middleware/auth';
 import { createReportCardPDF } from '../utils/pdfGenerator';
 import { createMarkSheetPDF } from '../utils/markSheetPdfGenerator';
+import OpenAI from 'openai';
 
 // Helper function to assign positions with proper tie handling
 // Students with the same score (average or percentage) get the same position, and positions are skipped after ties
@@ -684,9 +685,14 @@ export const captureMarks = async (req: AuthRequest, res: Response) => {
 
       if (existing) {
         // Update existing mark
-        existing.score = mark.score ? Math.round(parseFloat(String(mark.score))) : 0;
+        if (mark.score !== null && mark.score !== undefined) {
+          existing.score = Math.round(parseFloat(String(mark.score)));
+        }
         existing.maxScore = mark.maxScore ? Math.round(parseFloat(String(mark.maxScore))) : 100;
-        existing.comments = mark.comments || existing.comments;
+        // Always update comments if provided (even if empty string, to allow clearing)
+        if (mark.comments !== undefined && mark.comments !== null) {
+          existing.comments = mark.comments;
+        }
         marksToSave.push(existing);
       } else {
         // Create new mark
@@ -694,9 +700,9 @@ export const captureMarks = async (req: AuthRequest, res: Response) => {
           examId: String(examId), // Ensure examId is a string
           studentId: String(mark.studentId),
           subjectId: String(mark.subjectId),
-          score: mark.score ? Math.round(parseFloat(String(mark.score))) : 0,
+          score: mark.score !== null && mark.score !== undefined ? Math.round(parseFloat(String(mark.score))) : 0,
           maxScore: mark.maxScore ? Math.round(parseFloat(String(mark.maxScore))) : 100,
-          comments: mark.comments || null,
+          comments: mark.comments !== undefined && mark.comments !== null ? mark.comments : null,
         });
         console.log('Creating new mark:', {
           examId: newMark.examId,
@@ -717,20 +723,194 @@ export const captureMarks = async (req: AuthRequest, res: Response) => {
       savedCount: marksToSave.length
     });
   } catch (error: any) {
-    console.error('Error capturing marks:', error);
+    console.error('[captureMarks] Error capturing marks:', error);
+    console.error('[captureMarks] Error stack:', error.stack);
+    console.error('[captureMarks] Error details:', {
+      examId: req.body?.examId,
+      marksDataCount: req.body?.marksData?.length,
+      errorMessage: error.message,
+      errorCode: error.code
+    });
+    
+    // Check if it's a database column error (migration not run)
+    if (error.message?.includes('column') && error.message?.includes('uniformMark')) {
+      return res.status(500).json({ 
+        message: 'Database migration required. Please run the migration to add uniformMark column to marks table.',
+        error: 'Missing column: uniformMark'
+      });
+    }
+    
     res.status(500).json({ 
       message: 'Server error', 
-      error: error.message || 'Unknown error' 
+      error: error.message || 'Unknown error',
+      details: process.env.NODE_ENV === 'development' ? error.stack : undefined
+    });
+  }
+};
+
+/**
+ * Generate AI-powered remarks for a student's mark
+ * POST /api/exams/generate-ai-remark
+ * Body: { studentId, subjectId, score, maxScore }
+ */
+export const generateAIRemark = async (req: AuthRequest, res: Response) => {
+  try {
+    if (!AppDataSource.isInitialized) {
+      await AppDataSource.initialize();
+    }
+
+    const { studentId, subjectId, score, maxScore } = req.body;
+
+    // Validate required fields
+    if (!studentId || !subjectId || score === undefined || score === null) {
+      return res.status(400).json({ message: 'studentId, subjectId, and score are required' });
+    }
+
+    const numericScore = parseFloat(score);
+    const numericMaxScore = parseFloat(maxScore) || 100;
+
+    if (isNaN(numericScore) || numericScore < 0 || numericScore > numericMaxScore) {
+      return res.status(400).json({ message: 'Invalid score value' });
+    }
+
+    // Check if OpenAI API key is configured
+    const openaiApiKey = process.env.OPENAI_API_KEY;
+    console.log('[generateAIRemark] OpenAI API key check:', { 
+      hasKey: !!openaiApiKey, 
+      keyLength: openaiApiKey ? openaiApiKey.length : 0,
+      keyPrefix: openaiApiKey ? openaiApiKey.substring(0, 7) + '...' : 'none',
+      allEnvKeys: Object.keys(process.env).filter(k => k.includes('OPENAI'))
+    });
+    if (!openaiApiKey || openaiApiKey.trim() === '') {
+      console.error('[generateAIRemark] OpenAI API key not found in environment variables');
+      console.error('[generateAIRemark] Available env vars:', Object.keys(process.env).filter(k => k.includes('AI') || k.includes('OPEN')));
+      return res.status(500).json({ 
+        message: 'OpenAI API key not configured. Please set OPENAI_API_KEY in your .env file and restart the server.',
+        error: 'OPENAI_API_KEY environment variable is missing or empty'
+      });
+    }
+
+    // Fetch student and subject details
+    const studentRepository = AppDataSource.getRepository(Student);
+    const subjectRepository = AppDataSource.getRepository(Subject);
+
+    console.log('[generateAIRemark] Fetching student and subject:', { studentId, subjectId });
+    const student = await studentRepository.findOne({ where: { id: studentId } });
+    const subject = await subjectRepository.findOne({ where: { id: subjectId } });
+
+    if (!student) {
+      console.error('[generateAIRemark] Student not found:', studentId);
+      return res.status(404).json({ message: 'Student not found' });
+    }
+
+    if (!subject) {
+      console.error('[generateAIRemark] Subject not found:', subjectId);
+      return res.status(404).json({ message: 'Subject not found' });
+    }
+
+    console.log('[generateAIRemark] Student and subject found:', { 
+      studentName: `${student.firstName} ${student.lastName}`, 
+      subjectName: subject.name 
+    });
+
+    // Calculate percentage
+    const percentage = (numericScore / numericMaxScore) * 100;
+
+    // Initialize OpenAI client
+    console.log('[generateAIRemark] Initializing OpenAI client...');
+    const openai = new OpenAI({
+      apiKey: openaiApiKey
+    });
+
+    // Create prompt for AI
+    const prompt = `Generate a brief, professional, and encouraging remark (comment) for a student's performance in ${subject.name}. 
+The student scored ${numericScore} out of ${numericMaxScore} (${percentage.toFixed(1)}%).
+
+Requirements:
+- The remark should be subject-specific and relevant to ${subject.name}
+- Keep it concise (1-2 sentences, maximum 100 words)
+- Be encouraging and constructive
+- If the score is high (80%+), acknowledge excellence and suggest maintaining the standard
+- If the score is moderate (50-79%), provide encouragement and suggest areas for improvement
+- If the score is low (<50%), be supportive and suggest specific ways to improve
+- Use professional educational language suitable for report cards
+- Do not include the score or percentage in the remark itself
+
+Generate only the remark text, without any additional explanation or formatting.`;
+
+    try {
+      console.log('[generateAIRemark] Calling OpenAI API...');
+      const completion = await openai.chat.completions.create({
+        model: 'gpt-3.5-turbo',
+        messages: [
+          {
+            role: 'system',
+            content: 'You are an experienced teacher providing constructive feedback on student performance. Your remarks are professional, encouraging, and subject-specific.'
+          },
+          {
+            role: 'user',
+            content: prompt
+          }
+        ],
+        max_tokens: 150,
+        temperature: 0.7
+      });
+
+      console.log('[generateAIRemark] OpenAI API response received');
+      const remark = completion.choices[0]?.message?.content?.trim() || '';
+
+      if (!remark) {
+        console.error('[generateAIRemark] Empty remark received from OpenAI');
+        return res.status(500).json({ message: 'Failed to generate remark from AI' });
+      }
+
+      console.log('[generateAIRemark] AI remark generated successfully, length:', remark.length);
+      res.json({ 
+        remark,
+        generatedAt: new Date().toISOString()
+      });
+    } catch (openaiError: any) {
+      console.error('OpenAI API error:', openaiError);
+      console.error('OpenAI API error details:', {
+        message: openaiError.message,
+        status: openaiError.status,
+        code: openaiError.code,
+        type: openaiError.type,
+        stack: openaiError.stack
+      });
+      return res.status(500).json({ 
+        message: 'Failed to generate AI remark',
+        error: openaiError.message || 'Unknown error',
+        details: process.env.NODE_ENV === 'development' ? {
+          status: openaiError.status,
+          code: openaiError.code,
+          type: openaiError.type
+        } : undefined
+      });
+    }
+  } catch (error: any) {
+    console.error('Error generating AI remark:', error);
+    console.error('Error stack:', error.stack);
+    res.status(500).json({ 
+      message: 'Server error', 
+      error: error.message || 'Unknown error',
+      details: process.env.NODE_ENV === 'development' ? error.stack : undefined
     });
   }
 };
 
 export const getMarks = async (req: AuthRequest, res: Response) => {
   try {
+    if (!AppDataSource.isInitialized) {
+      await AppDataSource.initialize();
+    }
+
     const marksRepository = AppDataSource.getRepository(Marks);
     const examRepository = AppDataSource.getRepository(Exam);
     const { examId, studentId, classId } = req.query;
     const user = req.user;
+
+    console.log('[getMarks] Request params:', { examId, studentId, classId });
 
     const where: any = { };
     if (examId) where.examId = examId;
@@ -743,7 +923,7 @@ export const getMarks = async (req: AuthRequest, res: Response) => {
 
     // Filter by class if provided
     if (classId) {
-      marks = marks.filter(mark => mark.student.classId === classId);
+      marks = marks.filter(mark => mark.student?.classId === classId);
     }
 
     // Filter by exam status: non-admin users can only see published exams
@@ -751,14 +931,16 @@ export const getMarks = async (req: AuthRequest, res: Response) => {
     if (!isAdmin) {
       // Get all exam IDs from marks
       const examIds = [...new Set(marks.map(m => m.examId))];
-      const exams = await examRepository.find({
-        where: { id: In(examIds) }
-      });
-      const publishedExamIds = new Set(
-        exams.filter(e => e.status === ExamStatus.PUBLISHED).map(e => e.id)
-      );
-      // Only return marks from published exams
-      marks = marks.filter(mark => publishedExamIds.has(mark.examId));
+      if (examIds.length > 0) {
+        const exams = await examRepository.find({
+          where: { id: In(examIds) }
+        });
+        const publishedExamIds = new Set(
+          exams.filter(e => e.status === ExamStatus.PUBLISHED).map(e => e.id)
+        );
+        // Only return marks from published exams
+        marks = marks.filter(mark => publishedExamIds.has(mark.examId));
+      }
     }
 
     // Round all scores to integers
@@ -769,8 +951,14 @@ export const getMarks = async (req: AuthRequest, res: Response) => {
     }));
 
     res.json(roundedMarks);
-  } catch (error) {
-    res.status(500).json({ message: 'Server error', error });
+  } catch (error: any) {
+    console.error('[getMarks] Error getting marks:', error);
+    console.error('[getMarks] Error stack:', error.stack);
+    res.status(500).json({ 
+      message: 'Server error', 
+      error: error.message || 'Unknown error',
+      details: process.env.NODE_ENV === 'development' ? error.stack : undefined
+    });
   }
 };
 
@@ -1567,15 +1755,26 @@ export const getReportCard = async (req: AuthRequest, res: Response) => {
       const subjectMarks = marksBySubject[subjectName];
       
       // Group marks by student to calculate each student's percentage
-      const studentMarksMap: { [key: string]: { scores: number[]; maxScores: number[] } } = {};
+      const studentMarksMap: { [key: string]: { scores: number[]; maxScores: number[]; percentages: number[] } } = {};
       
       subjectMarks.forEach(mark => {
         if (mark.studentId && mark.score && mark.maxScore) {
           if (!studentMarksMap[mark.studentId]) {
-            studentMarksMap[mark.studentId] = { scores: [], maxScores: [] };
+            studentMarksMap[mark.studentId] = { scores: [], maxScores: [], percentages: [] };
           }
-          studentMarksMap[mark.studentId].scores.push(parseFloat(String(mark.score || 0)));
-          studentMarksMap[mark.studentId].maxScores.push(parseFloat(String(mark.maxScore || 0)));
+          // Use uniformMark if available (moderated mark), otherwise use original score
+          const hasUniformMark = mark.uniformMark !== null && mark.uniformMark !== undefined;
+          if (hasUniformMark) {
+            // uniformMark is stored as percentage (0-100)
+            const uniformMarkPercentage = parseFloat(String(mark.uniformMark));
+            studentMarksMap[mark.studentId].percentages.push(uniformMarkPercentage);
+          } else {
+            // Use original score to calculate percentage
+            const score = parseFloat(String(mark.score || 0));
+            const maxScore = parseFloat(String(mark.maxScore || 0));
+            studentMarksMap[mark.studentId].scores.push(score);
+            studentMarksMap[mark.studentId].maxScores.push(maxScore);
+          }
         }
       });
       
@@ -1583,11 +1782,18 @@ export const getReportCard = async (req: AuthRequest, res: Response) => {
       const studentPercentages: number[] = [];
       Object.keys(studentMarksMap).forEach(studentId => {
         const studentData = studentMarksMap[studentId];
-        const totalScore = studentData.scores.reduce((a, b) => a + b, 0);
-        const totalMaxScore = studentData.maxScores.reduce((a, b) => a + b, 0);
-        if (totalMaxScore > 0) {
-          const percentage = (totalScore / totalMaxScore) * 100;
-          studentPercentages.push(percentage);
+        if (studentData.percentages && studentData.percentages.length > 0) {
+          // Use uniformMark percentages if available
+          const avgPercentage = studentData.percentages.reduce((a, b) => a + b, 0) / studentData.percentages.length;
+          studentPercentages.push(avgPercentage);
+        } else {
+          // Calculate from original scores
+          const totalScore = studentData.scores.reduce((a, b) => a + b, 0);
+          const totalMaxScore = studentData.maxScores.reduce((a, b) => a + b, 0);
+          if (totalMaxScore > 0) {
+            const percentage = (totalScore / totalMaxScore) * 100;
+            studentPercentages.push(percentage);
+          }
         }
       });
       
@@ -1613,7 +1819,12 @@ export const getReportCard = async (req: AuthRequest, res: Response) => {
     const classStudentAverages: { [key: string]: { total: number; count: number } } = {};
     classMarks.forEach(mark => {
       // Skip marks with missing data
-      if (!mark.studentId || !mark.score || !mark.maxScore || mark.maxScore === 0) {
+      if (!mark.studentId || !mark.maxScore || mark.maxScore === 0) {
+        return;
+      }
+      
+      // Skip if no score and no uniformMark
+      if ((!mark.score || mark.score === 0) && (mark.uniformMark === null || mark.uniformMark === undefined)) {
         return;
       }
       
@@ -1621,7 +1832,13 @@ export const getReportCard = async (req: AuthRequest, res: Response) => {
       if (!classStudentAverages[sid]) {
         classStudentAverages[sid] = { total: 0, count: 0 };
       }
-      const percentage = (mark.score / mark.maxScore) * 100;
+      
+      // Use uniformMark if available (moderated mark), otherwise use original score
+      const hasUniformMark = mark.uniformMark !== null && mark.uniformMark !== undefined;
+      const percentage = hasUniformMark 
+        ? parseFloat(String(mark.uniformMark)) // uniformMark is already a percentage
+        : ((mark.score || 0) / mark.maxScore) * 100;
+      
       classStudentAverages[sid].total += percentage;
       classStudentAverages[sid].count += 1;
     });
@@ -1731,22 +1948,51 @@ export const getReportCard = async (req: AuthRequest, res: Response) => {
       const studentMarks = allMarks.filter(m => m.studentId === student.id);
 
       // Group marks by subject (across all exams)
-      const subjectMarksMap: { [key: string]: { scores: number[]; maxScores: number[]; comments: string[] } } = {};
+      const subjectMarksMap: { [key: string]: { scores: number[]; maxScores: number[]; percentages: number[]; comments: string[] } } = {};
 
       studentMarks.forEach(mark => {
-        // Skip marks with missing relations
-        if (!mark.subject || !mark.score || !mark.maxScore) {
-          console.warn('Skipping mark with missing data:', { markId: mark.id, hasSubject: !!mark.subject, hasScore: !!mark.score, hasMaxScore: !!mark.maxScore });
+        // Skip marks with missing subject
+        if (!mark.subject) {
+          console.warn('Skipping mark with missing subject:', { markId: mark.id });
+          return;
+        }
+        
+        // Check if mark has either score or uniformMark
+        const hasScore = mark.score !== null && mark.score !== undefined;
+        const hasUniformMark = mark.uniformMark !== null && mark.uniformMark !== undefined;
+        
+        // Skip if neither score nor uniformMark is available
+        if (!hasScore && !hasUniformMark) {
+          console.warn('Skipping mark with no score or uniformMark:', { markId: mark.id });
           return;
         }
         
         const subjectName = mark.subject.name;
         if (!subjectMarksMap[subjectName]) {
-          subjectMarksMap[subjectName] = { scores: [], maxScores: [], comments: [] };
+          subjectMarksMap[subjectName] = { scores: [], maxScores: [], percentages: [], comments: [] };
         }
-        // Round scores to integers
-        subjectMarksMap[subjectName].scores.push(Math.round(parseFloat(String(mark.score)) || 0));
-        subjectMarksMap[subjectName].maxScores.push(Math.round(parseFloat(String(mark.maxScore)) || 100));
+        
+        // Use maxScore if available, otherwise default to 100
+        const maxScore = mark.maxScore && mark.maxScore > 0 ? parseFloat(String(mark.maxScore)) : 100;
+        
+        // Prioritize uniformMark if available (moderated mark), otherwise use original score
+        if (hasUniformMark) {
+          // uniformMark is stored as percentage (0-100)
+          const uniformMarkPercentage = parseFloat(String(mark.uniformMark));
+          // Calculate score from uniformMark percentage for display purposes
+          const scoreFromUniform = Math.round((uniformMarkPercentage / 100) * maxScore);
+          subjectMarksMap[subjectName].scores.push(scoreFromUniform);
+          subjectMarksMap[subjectName].percentages.push(uniformMarkPercentage);
+          subjectMarksMap[subjectName].maxScores.push(Math.round(maxScore));
+        } else if (hasScore) {
+          // Use original score only if uniformMark is not available
+          const originalScore = Math.round(parseFloat(String(mark.score)) || 0);
+          const originalPercentage = maxScore > 0 ? (originalScore / maxScore) * 100 : 0;
+          subjectMarksMap[subjectName].scores.push(originalScore);
+          subjectMarksMap[subjectName].percentages.push(originalPercentage);
+          subjectMarksMap[subjectName].maxScores.push(Math.round(maxScore));
+        }
+        
         if (mark.comments) {
           subjectMarksMap[subjectName].comments.push(mark.comments);
         }
@@ -1762,11 +2008,28 @@ export const getReportCard = async (req: AuthRequest, res: Response) => {
         const marksData = subjectMarksMap[subjectName];
         const classAverage = classAverages[subjectName] || 0;
         
-        if (marksData && marksData.scores.length > 0) {
+        if (marksData && (marksData.scores.length > 0 || marksData.percentages.length > 0)) {
           // Student has marks for this subject
-          const totalScore = marksData.scores.reduce((a, b) => a + b, 0);
-          const totalMaxScore = marksData.maxScores.reduce((a, b) => a + b, 0);
-          const percentage = totalMaxScore > 0 ? (totalScore / totalMaxScore) * 100 : 0;
+          let totalScore = 0;
+          let totalMaxScore = 0;
+          let percentage = 0;
+
+          // Prioritize uniformMark percentages if available
+          if (marksData.percentages.length > 0) {
+            // Use average of uniformMark percentages if available
+            percentage = marksData.percentages.reduce((a, b) => a + b, 0) / marksData.percentages.length;
+            // For display, convert percentage back to a score out of 100 (or use maxScore if available)
+            totalMaxScore = marksData.maxScores.length > 0 
+              ? marksData.maxScores.reduce((a, b) => a + b, 0) / marksData.maxScores.length
+              : 100;
+            totalScore = Math.round((percentage / 100) * totalMaxScore);
+          } else {
+            // Calculate from original scores
+            totalScore = marksData.scores.reduce((a, b) => a + b, 0);
+            totalMaxScore = marksData.maxScores.reduce((a, b) => a + b, 0);
+            percentage = totalMaxScore > 0 ? (totalScore / totalMaxScore) * 100 : 0;
+          }
+          
           const gradeInfo = getGradeInfo(percentage);
           const subjectPoints = isUpperForm ? (gradePoints[gradeInfo.key] ?? 0) : undefined;
           return {
@@ -2133,16 +2396,31 @@ export const generateReportCardPDF = async (req: AuthRequest, res: Response) => 
       Object.keys(marksBySubject).forEach(subjectName => {
         const subjectMarks = marksBySubject[subjectName];
         
-        // Group marks by student to calculate each student's percentage
-        const studentMarksMap: { [key: string]: { scores: number[]; maxScores: number[] } } = {};
+      // Group marks by student to calculate each student's percentage
+      const studentMarksMap: { [key: string]: { scores: number[]; maxScores: number[]; percentages: number[] } } = {};
         
         subjectMarks.forEach(mark => {
-          if (mark.studentId && mark.score && mark.maxScore) {
-            if (!studentMarksMap[mark.studentId]) {
-              studentMarksMap[mark.studentId] = { scores: [], maxScores: [] };
+          if (mark.studentId && mark.maxScore) {
+            // Skip if no score and no uniformMark
+            if ((!mark.score || mark.score === 0) && (mark.uniformMark === null || mark.uniformMark === undefined)) {
+              return;
             }
-            studentMarksMap[mark.studentId].scores.push(parseFloat(String(mark.score || 0)));
-            studentMarksMap[mark.studentId].maxScores.push(parseFloat(String(mark.maxScore || 0)));
+            if (!studentMarksMap[mark.studentId]) {
+              studentMarksMap[mark.studentId] = { scores: [], maxScores: [], percentages: [] };
+            }
+            // Use uniformMark if available (moderated mark), otherwise use original score
+            const hasUniformMark = mark.uniformMark !== null && mark.uniformMark !== undefined;
+            if (hasUniformMark) {
+              // uniformMark is stored as percentage (0-100)
+              const uniformMarkPercentage = parseFloat(String(mark.uniformMark));
+              studentMarksMap[mark.studentId].percentages.push(uniformMarkPercentage);
+            } else {
+              // Use original score to calculate percentage
+              const score = parseFloat(String(mark.score || 0));
+              const maxScore = parseFloat(String(mark.maxScore || 0));
+              studentMarksMap[mark.studentId].scores.push(score);
+              studentMarksMap[mark.studentId].maxScores.push(maxScore);
+            }
           }
         });
         
@@ -2150,11 +2428,18 @@ export const generateReportCardPDF = async (req: AuthRequest, res: Response) => 
         const studentPercentages: number[] = [];
         Object.keys(studentMarksMap).forEach(studentId => {
           const studentData = studentMarksMap[studentId];
-          const totalScore = studentData.scores.reduce((a, b) => a + b, 0);
-          const totalMaxScore = studentData.maxScores.reduce((a, b) => a + b, 0);
-          if (totalMaxScore > 0) {
-            const percentage = (totalScore / totalMaxScore) * 100;
-            studentPercentages.push(percentage);
+          if (studentData.percentages && studentData.percentages.length > 0) {
+            // Use uniformMark percentages if available
+            const avgPercentage = studentData.percentages.reduce((a, b) => a + b, 0) / studentData.percentages.length;
+            studentPercentages.push(avgPercentage);
+          } else {
+            // Calculate from original scores
+            const totalScore = studentData.scores.reduce((a, b) => a + b, 0);
+            const totalMaxScore = studentData.maxScores.reduce((a, b) => a + b, 0);
+            if (totalMaxScore > 0) {
+              const percentage = (totalScore / totalMaxScore) * 100;
+              studentPercentages.push(percentage);
+            }
           }
         });
         
@@ -2637,11 +2922,7 @@ export const generateMarkSheet = async (req: AuthRequest, res: Response) => {
       return res.status(400).json({ message: 'Class ID and exam type are required' });
     }
 
-    // For teachers, subjectId is required
-    if (isTeacher && !subjectId) {
-      return res.status(400).json({ message: 'Subject ID is required for teachers' });
-    }
-
+    // SubjectId is optional - if not provided, show all subjects
     const studentRepository = AppDataSource.getRepository(Student);
     const examRepository = AppDataSource.getRepository(Exam);
     const marksRepository = AppDataSource.getRepository(Marks);
@@ -2659,11 +2940,11 @@ export const generateMarkSheet = async (req: AuthRequest, res: Response) => {
       return res.status(404).json({ message: 'Class not found' });
     }
 
-    // For teachers, verify assignment to class and subject
+    // For teachers, verify assignment to class
     if (isTeacher && user?.teacher?.id) {
       const teacher = await teacherRepository.findOne({
         where: { id: user.teacher.id },
-        relations: ['classes', 'subjects']
+        relations: ['classes']
       });
 
       if (!teacher) {
@@ -2674,14 +2955,6 @@ export const generateMarkSheet = async (req: AuthRequest, res: Response) => {
       const isAssignedToClass = teacher.classes?.some(c => c.id === classId);
       if (!isAssignedToClass) {
         return res.status(403).json({ message: 'You are not assigned to this class' });
-      }
-
-      // Verify teacher teaches this subject
-      if (subjectId) {
-        const teachesSubject = teacher.subjects?.some(s => s.id === subjectId);
-        if (!teachesSubject) {
-          return res.status(403).json({ message: 'You are not assigned to teach this subject' });
-        }
       }
     }
 
@@ -2710,9 +2983,31 @@ export const generateMarkSheet = async (req: AuthRequest, res: Response) => {
     }
 
     // Get all subjects for this class
-    const subjects = classEntity.subjects || [];
+    let subjects = classEntity.subjects || [];
+    
+    // If no subjects are assigned to the class, get subjects from the exams instead
+    if (subjects.length === 0 && exams.length > 0) {
+      console.log('No subjects assigned to class, getting subjects from exams...');
+      const examSubjectsSet = new Set<string>();
+      const examSubjectsMap = new Map<string, Subject>();
+      
+      exams.forEach(exam => {
+        if (exam.subjects && exam.subjects.length > 0) {
+          exam.subjects.forEach((subject: Subject) => {
+            if (!examSubjectsSet.has(subject.id)) {
+              examSubjectsSet.add(subject.id);
+              examSubjectsMap.set(subject.id, subject);
+            }
+          });
+        }
+      });
+      
+      subjects = Array.from(examSubjectsMap.values());
+      console.log('Found subjects from exams:', subjects.length, subjects.map(s => s.name));
+    }
+    
     if (subjects.length === 0) {
-      return res.status(404).json({ message: 'No subjects found for this class' });
+      return res.status(404).json({ message: 'No subjects found for this class or in the exams' });
     }
 
     // Get all marks for these exams
@@ -2752,15 +3047,33 @@ export const generateMarkSheet = async (req: AuthRequest, res: Response) => {
             new Date(b.exam.examDate).getTime() - new Date(a.exam.examDate).getTime()
           )[0];
 
+          // Prioritize uniformMark if available (moderated mark), otherwise use original score
+          const hasUniformMark = latestMark.uniformMark !== null && latestMark.uniformMark !== undefined;
+          const maxScore = Math.round(parseFloat(String(latestMark.maxScore)) || 100);
+          
+          let score: number;
+          let percentage: number;
+          
+          if (hasUniformMark) {
+            // Use moderated mark (uniformMark is stored as percentage 0-100)
+            percentage = parseFloat(String(latestMark.uniformMark));
+            // Calculate score from uniformMark percentage for display
+            score = Math.round((percentage / 100) * maxScore);
+          } else {
+            // Use original score
+            score = Math.round(parseFloat(String(latestMark.score)) || 0);
+            percentage = maxScore > 0 ? Math.round((score / maxScore) * 100) : 0;
+          }
+
           studentRow.subjects[subject.id] = {
             subjectName: subject.name,
-            score: Math.round(parseFloat(String(latestMark.score)) || 0),
-            maxScore: Math.round(parseFloat(String(latestMark.maxScore)) || 100),
-            percentage: Math.round(((parseFloat(String(latestMark.score)) || 0) / (parseFloat(String(latestMark.maxScore)) || 100)) * 100)
+            score: score,
+            maxScore: maxScore,
+            percentage: percentage
           };
 
-          studentRow.totalScore += parseFloat(String(latestMark.score)) || 0;
-          studentRow.totalMaxScore += parseFloat(String(latestMark.maxScore)) || 100;
+          studentRow.totalScore += score;
+          studentRow.totalMaxScore += maxScore;
         } else {
           studentRow.subjects[subject.id] = {
             subjectName: subject.name,
@@ -2963,15 +3276,33 @@ export const generateMarkSheetPDF = async (req: AuthRequest, res: Response) => {
             new Date(b.exam.examDate).getTime() - new Date(a.exam.examDate).getTime()
           )[0];
 
+          // Prioritize uniformMark if available (moderated mark), otherwise use original score
+          const hasUniformMark = latestMark.uniformMark !== null && latestMark.uniformMark !== undefined;
+          const maxScore = Math.round(parseFloat(String(latestMark.maxScore)) || 100);
+          
+          let score: number;
+          let percentage: number;
+          
+          if (hasUniformMark) {
+            // Use moderated mark (uniformMark is stored as percentage 0-100)
+            percentage = parseFloat(String(latestMark.uniformMark));
+            // Calculate score from uniformMark percentage for display
+            score = Math.round((percentage / 100) * maxScore);
+          } else {
+            // Use original score
+            score = Math.round(parseFloat(String(latestMark.score)) || 0);
+            percentage = maxScore > 0 ? Math.round((score / maxScore) * 100) : 0;
+          }
+
           studentRow.subjects[subject.id] = {
             subjectName: subject.name,
-            score: Math.round(parseFloat(String(latestMark.score)) || 0),
-            maxScore: Math.round(parseFloat(String(latestMark.maxScore)) || 100),
-            percentage: Math.round(((parseFloat(String(latestMark.score)) || 0) / (parseFloat(String(latestMark.maxScore)) || 100)) * 100)
+            score: score,
+            maxScore: maxScore,
+            percentage: percentage
           };
 
-          studentRow.totalScore += parseFloat(String(latestMark.score)) || 0;
-          studentRow.totalMaxScore += parseFloat(String(latestMark.maxScore)) || 100;
+          studentRow.totalScore += score;
+          studentRow.totalMaxScore += maxScore;
         } else {
           studentRow.subjects[subject.id] = {
             subjectName: subject.name,
@@ -3107,6 +3438,587 @@ export const saveReportCardRemarks = async (req: AuthRequest, res: Response) => 
   } catch (error: any) {
     console.error('Error saving report card remarks:', error);
     res.status(500).json({ message: 'Server error', error: error.message || 'Unknown error' });
+  }
+};
+
+/**
+ * Linear Scaling Mark Moderation Algorithm
+ * Scales raw marks linearly from [minRaw, maxRaw] to [targetMin, targetMax]
+ * Formula: moderated = targetMin + ((x - minRaw) / (maxRaw - minRaw)) × (targetMax - targetMin)
+ * If maxRaw == minRaw, all marks are set to midpoint: (targetMin + targetMax) / 2
+ */
+function moderateMarksLinear(rawMarks: number[], targetMin: number, targetMax: number): number[] {
+  if (rawMarks.length === 0) return [];
+  if (rawMarks.length === 1) {
+    // Single mark: set to midpoint and round to nearest whole number
+    const midpoint = (targetMin + targetMax) / 2;
+    const clipped = Math.max(0, Math.min(100, midpoint));
+    return [Math.round(clipped)];
+  }
+
+  // Find min and max raw marks
+  const minRaw = Math.min(...rawMarks);
+  const maxRaw = Math.max(...rawMarks);
+
+  // Handle edge case: all marks are the same
+  if (maxRaw === minRaw) {
+    const midpoint = (targetMin + targetMax) / 2;
+    const clippedMidpoint = Math.max(0, Math.min(100, midpoint));
+    return rawMarks.map(() => Math.round(clippedMidpoint));
+  }
+
+  // Apply linear scaling formula
+  const moderated: number[] = [];
+  for (let i = 0; i < rawMarks.length; i++) {
+    const x = rawMarks[i];
+    // Formula: moderated = targetMin + ((x - minRaw) / (maxRaw - minRaw)) × (targetMax - targetMin)
+    const moderatedValue = targetMin + ((x - minRaw) / (maxRaw - minRaw)) * (targetMax - targetMin);
+    
+    // Clip to 0-100 range and round to nearest whole number
+    const clipped = Math.max(0, Math.min(100, moderatedValue));
+    moderated.push(Math.round(clipped));
+  }
+
+  return moderated;
+}
+
+/**
+ * Moderate Marks Endpoint
+ * POST /api/exams/moderate-marks
+ * Body: { classId, subjectId, examType, targetMin, targetMax }
+ */
+export const moderateMarksEndpoint = async (req: AuthRequest, res: Response) => {
+  try {
+    if (!AppDataSource.isInitialized) {
+      await AppDataSource.initialize();
+    }
+
+    const { classId, subjectId, examType, targetMin, targetMax } = req.body;
+
+    if (!classId || !subjectId || !examType) {
+      return res.status(400).json({ message: 'classId, subjectId, and examType are required' });
+    }
+
+    // Validate and set default values for targetMin and targetMax
+    const minTarget = targetMin !== undefined ? parseFloat(targetMin) : 30;
+    const maxTarget = targetMax !== undefined ? parseFloat(targetMax) : 90;
+
+    // Validate target range
+    if (isNaN(minTarget) || isNaN(maxTarget)) {
+      return res.status(400).json({ message: 'targetMin and targetMax must be valid numbers' });
+    }
+    if (minTarget < 0 || minTarget > 100 || maxTarget < 0 || maxTarget > 100) {
+      return res.status(400).json({ message: 'targetMin and targetMax must be between 0 and 100' });
+    }
+    if (minTarget >= maxTarget) {
+      return res.status(400).json({ message: 'targetMin must be less than targetMax' });
+    }
+
+    const marksRepository = AppDataSource.getRepository(Marks);
+    const studentRepository = AppDataSource.getRepository(Student);
+    const examRepository = AppDataSource.getRepository(Exam);
+    const subjectRepository = AppDataSource.getRepository(Subject);
+    const classRepository = AppDataSource.getRepository(Class);
+    const settingsRepository = AppDataSource.getRepository(Settings);
+    const teacherRepository = AppDataSource.getRepository(Teacher);
+
+    // Verify subject and class exist
+    const subject = await subjectRepository.findOne({ 
+      where: { id: subjectId },
+      relations: ['exams']
+    });
+    if (!subject) {
+      return res.status(404).json({ message: 'Subject not found' });
+    }
+
+    const classEntity = await classRepository.findOne({ where: { id: classId } });
+    if (!classEntity) {
+      return res.status(404).json({ message: 'Class not found' });
+    }
+
+    // Find exam that matches classId, subjectId (through exam subjects), and examType
+    const exams = await examRepository.find({
+      where: {
+        classId: classId,
+        type: examType as ExamType
+      },
+      relations: ['subjects']
+    });
+
+    // Filter exams that include this subject
+    const exam = exams.find(e => 
+      e.subjects?.some(s => s.id === subjectId)
+    );
+
+    if (!exam) {
+      return res.status(404).json({ 
+        message: `No exam found for class, subject, and exam type (${examType}) combination` 
+      });
+    }
+
+    // Get all students in the class
+    const students = await studentRepository.find({
+      where: { classId, isActive: true },
+      order: { firstName: 'ASC', lastName: 'ASC' }
+    });
+
+    if (students.length === 0) {
+      return res.status(404).json({ message: 'No students found in this class' });
+    }
+
+    // Get all marks for this exam, subject, and class
+    const marks = await marksRepository.find({
+      where: {
+        examId: exam.id,
+        subjectId,
+        studentId: In(students.map(s => s.id))
+      },
+      relations: ['student']
+    });
+
+    if (marks.length === 0) {
+      return res.status(404).json({ message: 'No marks found for this exam/subject/class combination' });
+    }
+
+    // Calculate raw mark percentages
+    const studentMarks: Array<{
+      studentId: string;
+      studentNumber: string;
+      firstName: string;
+      lastName: string;
+      rawMark: number;
+      markId?: string;
+    }> = [];
+
+    marks.forEach(mark => {
+      const rawMarkPercent = mark.maxScore > 0 ? (mark.score / mark.maxScore) * 100 : 0;
+      studentMarks.push({
+        studentId: mark.studentId,
+        studentNumber: mark.student.studentNumber,
+        firstName: mark.student.firstName,
+        lastName: mark.student.lastName,
+        rawMark: parseFloat(rawMarkPercent.toFixed(2)),
+        markId: mark.id
+      });
+    });
+
+    // Include students without marks (with 0% raw mark)
+    const studentsWithMarks = new Set(marks.map(m => m.studentId));
+    students.forEach(student => {
+      if (!studentsWithMarks.has(student.id)) {
+        studentMarks.push({
+          studentId: student.id,
+          studentNumber: student.studentNumber,
+          firstName: student.firstName,
+          lastName: student.lastName,
+          rawMark: 0,
+          markId: undefined
+        });
+      }
+    });
+
+    // Extract raw marks for moderation
+    const rawMarks = studentMarks.map(sm => sm.rawMark);
+
+    // Apply linear scaling moderation algorithm
+    const uniformMarks = moderateMarksLinear(rawMarks, minTarget, maxTarget);
+
+    // Combine results
+    const moderatedResults = studentMarks.map((sm, index) => ({
+      ...sm,
+      uniformMark: uniformMarks[index]
+    }));
+
+    // Get subject teacher
+    const subjectTeachers = await teacherRepository.find({
+      where: { isActive: true },
+      relations: ['subjects', 'classes']
+    });
+    const subjectTeacher = subjectTeachers.find(t =>
+      t.subjects?.some(s => s.id === subjectId) &&
+      t.classes?.some(c => c.id === classId)
+    );
+
+    // Get school name from settings
+    const settings = await settingsRepository.findOne({ where: {} });
+    const schoolName = settings?.schoolName || 'School';
+
+    // Save uniform marks to database
+    for (let i = 0; i < moderatedResults.length; i++) {
+      const result = moderatedResults[i];
+      if (result.markId) {
+        // Update existing mark
+        const mark = await marksRepository.findOne({ where: { id: result.markId } });
+        if (mark) {
+          mark.uniformMark = result.uniformMark;
+          await marksRepository.save(mark);
+        }
+      } else if (result.rawMark > 0) {
+        // Create new mark entry with uniform mark
+        // Note: This shouldn't happen if rawMark is 0, but handle it anyway
+        const existingMark = await marksRepository.findOne({
+          where: {
+            examId: exam.id,
+            subjectId,
+            studentId: result.studentId
+          }
+        });
+        if (existingMark) {
+          existingMark.uniformMark = result.uniformMark;
+          await marksRepository.save(existingMark);
+        }
+      }
+    }
+
+    res.json({
+      schoolName,
+      subject: subject.name,
+      subjectCode: subject.code,
+      subjectTeacher: subjectTeacher
+        ? `${subjectTeacher.firstName} ${subjectTeacher.lastName}`
+        : 'Not Assigned',
+      examType: exam.type,
+      examName: exam.name,
+      term: exam.term,
+      results: moderatedResults
+    });
+  } catch (error: any) {
+    console.error('Error moderating marks:', error);
+    res.status(500).json({ message: 'Server error', error: error.message || 'Unknown error' });
+  }
+};
+
+/**
+ * Save Moderated Marks Endpoint
+ * POST /api/exams/save-moderated-marks
+ * Body: { classId, subjectId, examType, moderatedResults: [{ studentId, uniformMark }] }
+ */
+export const saveModeratedMarksEndpoint = async (req: AuthRequest, res: Response) => {
+  try {
+    if (!AppDataSource.isInitialized) {
+      await AppDataSource.initialize();
+    }
+
+    const { classId, subjectId, examType, moderatedResults } = req.body;
+
+    if (!classId || !subjectId || !examType) {
+      return res.status(400).json({ message: 'classId, subjectId, and examType are required' });
+    }
+
+    if (!moderatedResults || !Array.isArray(moderatedResults) || moderatedResults.length === 0) {
+      return res.status(400).json({ message: 'moderatedResults array is required and must not be empty' });
+    }
+
+    const marksRepository = AppDataSource.getRepository(Marks);
+    const examRepository = AppDataSource.getRepository(Exam);
+
+    // Find exam that matches classId, subjectId, and examType
+    const exams = await examRepository.find({
+      where: {
+        classId: classId,
+        type: examType as ExamType
+      },
+      relations: ['subjects']
+    });
+
+    // Filter exams that include this subject
+    const exam = exams.find(e => 
+      e.subjects?.some(s => s.id === subjectId)
+    );
+
+    if (!exam) {
+      return res.status(404).json({ 
+        message: `No exam found for class, subject, and exam type (${examType}) combination` 
+      });
+    }
+
+    // Update marks with uniformMark values
+    let savedCount = 0;
+    for (const result of moderatedResults) {
+      if (!result.studentId || result.uniformMark === undefined || result.uniformMark === null) {
+        continue; // Skip invalid entries
+      }
+
+      // Find the mark for this student, exam, and subject
+      const existingMark = await marksRepository.findOne({
+        where: {
+          examId: exam.id,
+          subjectId: subjectId,
+          studentId: result.studentId
+        }
+      });
+
+      if (existingMark) {
+        // Update existing mark with uniformMark
+        existingMark.uniformMark = parseFloat(String(result.uniformMark));
+        await marksRepository.save(existingMark);
+        savedCount++;
+      } else {
+        // If mark doesn't exist, we could create it, but typically marks should already exist
+        console.warn(`Mark not found for student ${result.studentId}, exam ${exam.id}, subject ${subjectId}`);
+      }
+    }
+
+    res.json({ 
+      message: `Successfully saved ${savedCount} moderated mark(s)`,
+      savedCount 
+    });
+  } catch (error: any) {
+    console.error('Error saving moderated marks:', error);
+    res.status(500).json({ message: 'Server error', error: error.message || 'Unknown error' });
+  }
+};
+
+/**
+ * Mark Input Progress Endpoint
+ * GET /api/exams/mark-input-progress
+ * Query params: examId?, subjectId?, term?, examType?
+ */
+export const getMarkInputProgress = async (req: AuthRequest, res: Response) => {
+  try {
+    if (!AppDataSource.isInitialized) {
+      await AppDataSource.initialize();
+    }
+
+    const { examId, subjectId, term, examType } = req.query;
+    
+    console.log('[getMarkInputProgress] Request params:', { examId, subjectId, term, examType });
+
+    const studentRepository = AppDataSource.getRepository(Student);
+    const marksRepository = AppDataSource.getRepository(Marks);
+    const classRepository = AppDataSource.getRepository(Class);
+    const examRepository = AppDataSource.getRepository(Exam);
+    const subjectRepository = AppDataSource.getRepository(Subject);
+
+    // Get all active classes
+    const classes = await classRepository.find({
+      where: { isActive: true },
+      order: { form: 'ASC', name: 'ASC' }
+    });
+
+    const progressData: Array<{
+      stream: string;
+      classes: Array<{
+        classId: string;
+        className: string;
+        totalStudents: number;
+        studentsWithMarks: number;
+        completionPercentage: number;
+      }>;
+      streamTotal: number;
+      streamWithMarks: number;
+      streamCompletionPercentage: number;
+    }> = [];
+
+    // Group classes by stream (form)
+    const streamMap: { [key: string]: Class[] } = {};
+    classes.forEach(cls => {
+      if (!streamMap[cls.form]) {
+        streamMap[cls.form] = [];
+      }
+      streamMap[cls.form].push(cls);
+    });
+
+    // Process each stream
+    for (const [stream, streamClasses] of Object.entries(streamMap)) {
+      const streamData: {
+        stream: string;
+        classes: Array<{
+          classId: string;
+          className: string;
+          totalStudents: number;
+          studentsWithMarks: number;
+          completionPercentage: number;
+        }>;
+        streamTotal: number;
+        streamWithMarks: number;
+        streamCompletionPercentage: number;
+      } = {
+        stream,
+        classes: [],
+        streamTotal: 0,
+        streamWithMarks: 0,
+        streamCompletionPercentage: 0
+      };
+
+      // Process each class in the stream
+      for (const classEntity of streamClasses) {
+        // Get all active students in this class
+        const students = await studentRepository.find({
+          where: { classId: classEntity.id, isActive: true }
+        });
+
+        const totalStudents = students.length;
+        streamData.streamTotal += totalStudents;
+
+        if (totalStudents === 0) {
+          streamData.classes.push({
+            classId: classEntity.id,
+            className: classEntity.name,
+            totalStudents: 0,
+            studentsWithMarks: 0,
+            completionPercentage: 0
+          });
+          continue;
+        }
+
+        // Build query for marks
+        if (students.length === 0) {
+          streamData.classes.push({
+            classId: classEntity.id,
+            className: classEntity.name,
+            totalStudents: 0,
+            studentsWithMarks: 0,
+            completionPercentage: 0
+          });
+          continue;
+        }
+
+        let marksQuery = marksRepository
+          .createQueryBuilder('marks')
+          .where('marks.studentId IN (:...studentIds)', {
+            studentIds: students.map(s => s.id)
+          });
+
+        // Apply filters
+        let examIds: string[] = [];
+        let shouldSkipClass = false;
+        
+        if (examId) {
+          // If specific exam ID is provided, use it
+          examIds = [examId as string];
+        } else if (examType || term) {
+          // Build exam query conditions
+          const examWhere: any = {
+            classId: classEntity.id
+          };
+          
+          // Add examType filter if provided
+          if (examType) {
+            examWhere.type = examType as ExamType;
+          }
+          
+          // Add term filter if provided
+          if (term) {
+            examWhere.term = term as string;
+          }
+          
+          // Get exams matching the criteria
+          const exams = await examRepository.find({
+            where: examWhere
+          });
+          
+          if (exams.length > 0) {
+            examIds = exams.map(e => e.id);
+          } else {
+            // No exams matching criteria, so no marks
+            shouldSkipClass = true;
+          }
+        }
+
+        // If we need to skip this class (no matching exams), add it with zero marks
+        if (shouldSkipClass) {
+          streamData.classes.push({
+            classId: classEntity.id,
+            className: classEntity.name,
+            totalStudents,
+            studentsWithMarks: 0,
+            completionPercentage: 0
+          });
+          continue;
+        }
+
+        // Apply exam filter to marks query (only if we have exam filters)
+        // If we have examType or term filters but no matching exams, we already skipped
+        if (examIds.length > 0) {
+          marksQuery = marksQuery.andWhere('marks.examId IN (:...examIds)', {
+            examIds: examIds
+          });
+        } else if (examId || examType || term) {
+          // If we have exam filters but no matching exams, skip this class
+          // (This should have been caught earlier, but adding as safety check)
+          streamData.classes.push({
+            classId: classEntity.id,
+            className: classEntity.name,
+            totalStudents,
+            studentsWithMarks: 0,
+            completionPercentage: 0
+          });
+          continue;
+        }
+
+        // Apply subject filter if provided
+        if (subjectId) {
+          marksQuery = marksQuery.andWhere('marks.subjectId = :subjectId', { subjectId });
+        }
+
+        // Count distinct students with marks
+        let marks: Marks[] = [];
+        try {
+          marks = await marksQuery.getMany();
+        } catch (queryError: any) {
+          console.error(`[getMarkInputProgress] Error querying marks for class ${classEntity.name}:`, queryError);
+          console.error(`[getMarkInputProgress] Query error details:`, {
+            classId: classEntity.id,
+            className: classEntity.name,
+            studentCount: students.length,
+            examIdsCount: examIds.length,
+            hasSubjectFilter: !!subjectId,
+            errorMessage: queryError.message,
+            errorStack: queryError.stack
+          });
+          // If query fails, skip this class
+          streamData.classes.push({
+            classId: classEntity.id,
+            className: classEntity.name,
+            totalStudents,
+            studentsWithMarks: 0,
+            completionPercentage: 0
+          });
+          continue;
+        }
+        const studentsWithMarksSet = new Set(marks.map(m => m.studentId));
+        const studentsWithMarks = studentsWithMarksSet.size;
+        streamData.streamWithMarks += studentsWithMarks;
+
+        const completionPercentage = totalStudents > 0
+          ? parseFloat(((studentsWithMarks / totalStudents) * 100).toFixed(2))
+          : 0;
+
+        streamData.classes.push({
+          classId: classEntity.id,
+          className: classEntity.name,
+          totalStudents,
+          studentsWithMarks,
+          completionPercentage
+        });
+      }
+
+      // Calculate stream-level completion
+      streamData.streamCompletionPercentage = streamData.streamTotal > 0
+        ? parseFloat(((streamData.streamWithMarks / streamData.streamTotal) * 100).toFixed(2))
+        : 0;
+
+      progressData.push(streamData);
+    }
+
+    res.json({
+      filters: {
+        examId: examId || null,
+        subjectId: subjectId || null,
+        term: term || null,
+        examType: examType || null
+      },
+      progress: progressData
+    });
+  } catch (error: any) {
+    console.error('[getMarkInputProgress] Error getting mark input progress:', error);
+    console.error('[getMarkInputProgress] Error stack:', error.stack);
+    res.status(500).json({ 
+      message: 'Server error', 
+      error: error.message || 'Unknown error',
+      details: process.env.NODE_ENV === 'development' ? error.stack : undefined
+    });
   }
 };
 

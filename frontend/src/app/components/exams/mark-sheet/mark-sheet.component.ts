@@ -29,9 +29,7 @@ export class MarkSheetComponent implements OnInit {
   
   examTypes = [
     { value: 'mid_term', label: 'Mid Term' },
-    { value: 'end_term', label: 'End of Term' },
-    { value: 'assignment', label: 'Assignment' },
-    { value: 'quiz', label: 'Quiz' }
+    { value: 'end_term', label: 'End Term' }
   ];
 
   markSheetData: any = null;
@@ -39,6 +37,11 @@ export class MarkSheetComponent implements OnInit {
   loading = false;
   error = '';
   success = '';
+  
+  // School settings
+  schoolLogo: string | null = null;
+  schoolName: string = 'JUNIOR HIGH SCHOOL';
+  schoolMotto: string = 'After instruction we soar';
   
   // Modern features
   searchQuery = '';
@@ -82,6 +85,55 @@ export class MarkSheetComponent implements OnInit {
     }
     
     this.loadActiveTerm();
+    this.loadSettings();
+  }
+
+  loadSettings() {
+    this.settingsService.getSettings().subscribe({
+      next: (settings: any) => {
+        console.log('Settings loaded:', settings);
+        // Handle both array and single object responses
+        let settingsData = settings;
+        if (Array.isArray(settings) && settings.length > 0) {
+          settingsData = settings[0];
+        }
+        
+        if (settingsData) {
+          // Get logo - check both schoolLogo and schoolLogo2
+          const logo = settingsData.schoolLogo || settingsData.schoolLogo2;
+          if (logo) {
+            // Handle base64 data URLs
+            if (typeof logo === 'string') {
+              if (logo.startsWith('data:image')) {
+                this.schoolLogo = logo;
+              } else if (logo.startsWith('http://') || logo.startsWith('https://')) {
+                this.schoolLogo = logo;
+              } else if (logo.length > 100) {
+                // Assume it's a base64 string without data URL prefix
+                this.schoolLogo = `data:image/png;base64,${logo}`;
+              } else {
+                // Might be a file path, try to construct URL
+                this.schoolLogo = logo;
+              }
+              console.log('School logo set:', this.schoolLogo ? 'Yes' : 'No', this.schoolLogo ? '(length: ' + this.schoolLogo.length + ')' : '');
+            }
+          } else {
+            console.log('No logo found in settings');
+          }
+          
+          if (settingsData.schoolName) {
+            this.schoolName = settingsData.schoolName.toUpperCase();
+          }
+          if (settingsData.schoolMotto) {
+            this.schoolMotto = settingsData.schoolMotto;
+          }
+        }
+      },
+      error: (err: any) => {
+        console.error('Error loading settings:', err);
+        // Use default values if settings fail to load
+      }
+    });
   }
 
   loadTeacherInfo() {
@@ -112,7 +164,8 @@ export class MarkSheetComponent implements OnInit {
   loadTeacherClasses(teacherId: string) {
     this.teacherService.getTeacherClasses(teacherId).subscribe({
       next: (response: any) => {
-        this.classes = (response.classes || []).filter((c: any) => c.isActive);
+        const classesList = (response.classes || []).filter((c: any) => c.isActive);
+        this.classes = this.classService.sortClasses(classesList);
         console.log('Loaded teacher classes:', this.classes.length);
       },
       error: (err: any) => {
@@ -127,8 +180,10 @@ export class MarkSheetComponent implements OnInit {
     // For admin/superadmin - load all classes
     this.loading = true;
     this.classService.getClasses().subscribe({
-      next: (data: any[]) => {
-        this.classes = (data || []).filter(c => c.isActive);
+      next: (data: any) => {
+        const classesList = Array.isArray(data) ? data : (data?.data || []);
+        const activeClasses = classesList.filter((c: any) => c.isActive);
+        this.classes = this.classService.sortClasses(activeClasses);
         this.loading = false;
       },
       error: (err: any) => {
@@ -249,37 +304,20 @@ export class MarkSheetComponent implements OnInit {
       return;
     }
 
-    if (!this.selectedSubjectId && !this.isAdmin) {
-      this.error = 'Please select a subject';
-      setTimeout(() => this.error = '', 5000);
-      return;
-    }
-
     this.loading = true;
     this.error = '';
     this.success = '';
     this.markSheetData = null;
 
-    // Build query parameters
-    const params: any = {
-      classId: this.selectedClassId,
-      examType: this.selectedExamType,
-      term: this.selectedTerm
-    };
-    
-    // Add subjectId if selected (for teacher filtering)
-    if (this.selectedSubjectId) {
-      params.subjectId = this.selectedSubjectId;
-    }
-
     this.examService.generateMarkSheet(
       this.selectedClassId, 
       this.selectedExamType, 
-      this.selectedTerm, 
-      this.selectedSubjectId || undefined
+      this.selectedTerm
     ).subscribe({
       next: (data: any) => {
         this.markSheetData = data;
+        // Calculate grade statistics for each student
+        this.calculateGradeStatistics(data.markSheet);
         this.filteredMarkSheet = [...data.markSheet];
         this.calculateStatistics();
         this.loading = false;
@@ -491,6 +529,70 @@ export class MarkSheetComponent implements OnInit {
     if (average >= 60) return '#ffc107';
     if (average >= 50) return '#fd7e14';
     return '#dc3545';
+  }
+
+  calculateGradeStatistics(markSheet: any[]) {
+    markSheet.forEach((row: any) => {
+      // Count grades for each subject
+      row.gradeCounts = {
+        aStar: 0,  // A*S (90-100)
+        a: 0,      // AS (80-89)
+        b: 0,      // BS (70-79)
+        c: 0,      // CS (60-69)
+        d: 0       // DS (50-59)
+      };
+      row.passed = 0;
+
+      if (this.markSheetData && this.markSheetData.subjects) {
+        this.markSheetData.subjects.forEach((subject: any) => {
+          const subjectMark = this.getSubjectMark(row, subject.id);
+          const percentage = subjectMark.percentage;
+
+          // Count grades
+          if (percentage >= 90) row.gradeCounts.aStar++;
+          else if (percentage >= 80) row.gradeCounts.a++;
+          else if (percentage >= 70) row.gradeCounts.b++;
+          else if (percentage >= 60) row.gradeCounts.c++;
+          else if (percentage >= 50) row.gradeCounts.d++;
+
+          // Count passed subjects (>= 50%)
+          if (percentage >= 50) row.passed++;
+        });
+      }
+    });
+  }
+
+  getGradeCount(row: any, grade: string): number {
+    if (!row.gradeCounts) return 0;
+    switch(grade) {
+      case 'aStar': return row.gradeCounts.aStar || 0;
+      case 'a': return row.gradeCounts.a || 0;
+      case 'b': return row.gradeCounts.b || 0;
+      case 'c': return row.gradeCounts.c || 0;
+      case 'd': return row.gradeCounts.d || 0;
+      default: return 0;
+    }
+  }
+
+  getSelectedSubjectName(): string {
+    if (!this.markSheetData || !this.selectedSubjectId) return '';
+    const subject = this.markSheetData.subjects.find((s: any) => s.id === this.selectedSubjectId);
+    return subject ? subject.name : '';
+  }
+
+  getSelectedSubjectMark(row: any): any {
+    if (!this.selectedSubjectId) return { score: 0, percentage: 0 };
+    return this.getSubjectMark(row, this.selectedSubjectId);
+  }
+
+  getSelectedExamTypeLabel(): string {
+    const examType = this.examTypes.find(et => et.value === this.selectedExamType);
+    return examType ? examType.label : this.selectedExamType;
+  }
+
+  onLogoError() {
+    console.error('Error loading school logo image');
+    this.schoolLogo = null; // Fallback to placeholder icon
   }
 
   getSubjectAverage(subjectId: string): number {

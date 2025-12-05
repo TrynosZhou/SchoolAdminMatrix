@@ -37,7 +37,162 @@ export const login = async (req: Request, res: Response) => {
       return res.status(400).json({ message: 'Username and password are required' });
     }
 
-    // Try to find user by username or email (email can be null for teachers)
+    // Check if this might be a student login (Student ID + DOB)
+    // First, try to find a student with matching studentNumber
+    const studentRepository = AppDataSource.getRepository(Student);
+    let student = null;
+    try {
+      const trimmedIdentifier = loginIdentifier.trim();
+      student = await studentRepository.findOne({
+        where: { studentNumber: trimmedIdentifier },
+        relations: ['classEntity']
+      });
+    } catch (studentError: any) {
+      console.error('[Login] Error checking for student:', studentError);
+      // Continue with regular login if student check fails
+    }
+
+    // If student found, verify DOB matches password
+    if (student && student.isActive) {
+      console.log('[Login] Potential student login detected, verifying DOB...');
+      
+      try {
+        // Verify Date of Birth matches password
+        // Password should be DOB in YYYY-MM-DD format
+        const providedDOB = new Date(password);
+        
+        // Check if date is valid
+        if (isNaN(providedDOB.getTime())) {
+          console.log('[Login] Invalid date format in password, continuing with regular login');
+          // Not a valid date, continue with regular login flow
+        } else {
+          const studentDOB = new Date(student.dateOfBirth);
+          
+          // Compare dates (ignore time)
+          const providedDateStr = `${providedDOB.getFullYear()}-${String(providedDOB.getMonth() + 1).padStart(2, '0')}-${String(providedDOB.getDate()).padStart(2, '0')}`;
+          const studentDateStr = `${studentDOB.getFullYear()}-${String(studentDOB.getMonth() + 1).padStart(2, '0')}-${String(studentDOB.getDate()).padStart(2, '0')}`;
+          
+          if (providedDateStr === studentDateStr) {
+            console.log('[Login] Student login verified via Student ID + DOB');
+            
+            // Find or create user account for student
+            let user = null;
+            if (student.userId) {
+              user = await userRepository.findOne({
+                where: { id: student.userId },
+                relations: ['student']
+              });
+            }
+
+            // If no user exists, create one
+            if (!user && !student.userId) {
+              console.log('[Login] Creating user account for student:', student.studentNumber);
+              
+              // Use the exact Student ID (studentNumber) as username
+              const studentUsername = student.studentNumber;
+              
+              // Check if username already exists
+              let existingUser = await userRepository.findOne({ 
+                where: { username: studentUsername } 
+              });
+              
+              if (!existingUser) {
+                existingUser = await userRepository
+                  .createQueryBuilder('user')
+                  .where('LOWER(user.username) = LOWER(:username)', { username: studentUsername })
+                  .getOne();
+              }
+              
+              if (existingUser) {
+                const userRole = existingUser.role as string;
+                if (userRole === UserRole.STUDENT || userRole === 'student') {
+                  student.userId = existingUser.id;
+                  await studentRepository.save(student);
+                  user = existingUser;
+                } else {
+                  console.log('[Login] Username exists for different role');
+                  return res.status(409).json({ 
+                    message: 'Student ID is already in use by another account type.' 
+                  });
+                }
+              } else {
+                // Create new user with DOB as password (hashed)
+                const hashedPassword = await bcrypt.hash(password, 10);
+                user = userRepository.create({
+                  username: studentUsername,
+                  email: null,
+                  password: hashedPassword,
+                  role: UserRole.STUDENT as any,
+                  isActive: true
+                });
+                await userRepository.save(user);
+                
+                // Link user to student
+                student.userId = user.id;
+                await studentRepository.save(student);
+              }
+            } else if (user) {
+              // User exists, verify username matches Student ID
+              if (user.username !== student.studentNumber) {
+                user.username = student.studentNumber;
+                await userRepository.save(user);
+              }
+            }
+
+            if (!user || !user.isActive) {
+              return res.status(401).json({ message: 'Account is inactive. Please contact the administrator.' });
+            }
+
+            // Generate JWT token
+            const secret = process.env.JWT_SECRET;
+            if (!secret) {
+              return res.status(500).json({ message: 'Server configuration error' });
+            }
+            const expiresIn = process.env.JWT_EXPIRES_IN || '30m';
+            // @ts-ignore - expiresIn accepts string values like '7d' which is valid
+            const token = jwt.sign(
+              { userId: user.id, role: user.role },
+              secret,
+              { expiresIn }
+            );
+
+            // Build response
+            const response: any = {
+              token,
+              user: {
+                id: user.id,
+                username: user.username,
+                role: user.role,
+                student: {
+                  id: student.id,
+                  studentNumber: student.studentNumber,
+                  firstName: student.firstName,
+                  lastName: student.lastName,
+                  dateOfBirth: student.dateOfBirth,
+                  classId: student.classId,
+                  classEntity: student.classEntity ? {
+                    id: student.classEntity.id,
+                    name: student.classEntity.name,
+                    form: student.classEntity.form
+                  } : null
+                }
+              }
+            };
+
+            console.log('[Login] Student authenticated via regular login:', student.studentNumber);
+            return res.json(response);
+          } else {
+            console.log('[Login] Student found but DOB mismatch, continuing with regular login');
+            // Continue to regular login flow - might be a different user with same username
+          }
+        }
+      } catch (dateError: any) {
+        console.log('[Login] Error parsing date, continuing with regular login:', dateError.message);
+        // Continue with regular login flow if date parsing fails
+      }
+    }
+
+    // Regular login flow - try to find user by username or email
     const user = await userRepository
       .createQueryBuilder('user')
       .leftJoinAndSelect('user.student', 'student')
@@ -505,5 +660,188 @@ export const logout = async (req: AuthRequest, res: Response) => {
   } catch (error: any) {
     console.error('Logout error:', error);
     res.status(500).json({ message: 'Failed to logout', error: error.message });
+  }
+};
+
+// Student login using Student ID (studentNumber) and Date of Birth
+export const studentLogin = async (req: Request, res: Response) => {
+  try {
+    // Ensure database is initialized
+    if (!AppDataSource.isInitialized) {
+      await AppDataSource.initialize();
+    }
+
+    const { studentId, dateOfBirth } = req.body;
+    
+    console.log('[Student Login] Request received:', { 
+      hasStudentId: !!studentId, 
+      hasDateOfBirth: !!dateOfBirth 
+    });
+    
+    if (!studentId || !dateOfBirth) {
+      return res.status(400).json({ message: 'Student ID and Date of Birth are required' });
+    }
+
+    const studentRepository = AppDataSource.getRepository(Student);
+    const userRepository = AppDataSource.getRepository(User);
+
+    // Find student by studentNumber (Student ID) - exact match (case-sensitive)
+    const trimmedStudentId = studentId.trim();
+    const student = await studentRepository.findOne({
+      where: { studentNumber: trimmedStudentId },
+      relations: ['classEntity']
+    });
+
+    if (!student) {
+      console.log('[Student Login] Student not found for Student ID:', trimmedStudentId);
+      return res.status(401).json({ message: 'Invalid Student ID or Date of Birth' });
+    }
+
+    // Verify that the entered Student ID exactly matches the studentNumber in database
+    if (student.studentNumber !== trimmedStudentId) {
+      console.log('[Student Login] Student ID mismatch:', { 
+        entered: trimmedStudentId, 
+        database: student.studentNumber 
+      });
+      return res.status(401).json({ message: 'Invalid Student ID or Date of Birth' });
+    }
+
+    if (!student.isActive) {
+      console.log('[Student Login] Student account is inactive:', student.id);
+      return res.status(401).json({ message: 'Student account is inactive. Please contact the administrator.' });
+    }
+
+    // Verify Date of Birth
+    // Convert DOB to YYYY-MM-DD format for comparison
+    const providedDOB = new Date(dateOfBirth);
+    const studentDOB = new Date(student.dateOfBirth);
+    
+    // Compare dates (ignore time)
+    const providedDateStr = `${providedDOB.getFullYear()}-${String(providedDOB.getMonth() + 1).padStart(2, '0')}-${String(providedDOB.getDate()).padStart(2, '0')}`;
+    const studentDateStr = `${studentDOB.getFullYear()}-${String(studentDOB.getMonth() + 1).padStart(2, '0')}-${String(studentDOB.getDate()).padStart(2, '0')}`;
+    
+    if (providedDateStr !== studentDateStr) {
+      console.log('[Student Login] DOB mismatch:', { provided: providedDateStr, student: studentDateStr });
+      return res.status(401).json({ message: 'Invalid Student ID or Date of Birth' });
+    }
+
+    // Find or create user account for student
+    let user = await userRepository.findOne({
+      where: { id: student.userId || '' },
+      relations: ['student']
+    });
+
+    // If no user exists, create one
+    if (!user && !student.userId) {
+      console.log('[Student Login] Creating user account for student:', student.studentNumber);
+      
+      // Use the exact Student ID (studentNumber) as username - must match exactly
+      const username = student.studentNumber; // Use exact case, no lowercase conversion
+      
+      // Check if username already exists (try both exact match and case-insensitive)
+      let existingUser = await userRepository.findOne({ 
+        where: { username: username } 
+      });
+      
+      // Also check case-insensitive match to handle any existing users
+      if (!existingUser) {
+        existingUser = await userRepository
+          .createQueryBuilder('user')
+          .where('LOWER(user.username) = LOWER(:username)', { username })
+          .getOne();
+      }
+      
+      if (existingUser) {
+        // If existing user found, verify it's for a student and link it
+        const userRole = existingUser.role as string;
+        if (userRole === UserRole.STUDENT || userRole === 'student') {
+          // Link existing user to student
+          student.userId = existingUser.id;
+          await studentRepository.save(student);
+          user = existingUser;
+          console.log('[Student Login] Linked existing user to student:', username);
+        } else {
+          // Username exists but for different role - this shouldn't happen, but handle it
+          console.log('[Student Login] Username exists for different role:', username);
+          return res.status(409).json({ 
+            message: 'Student ID is already in use by another account type. Please contact administrator.' 
+          });
+        }
+      } else {
+        // Create new user with exact Student ID as username
+        const hashedPassword = await bcrypt.hash(dateOfBirth, 10);
+        user = userRepository.create({
+          username: username, // Exact Student ID as username
+          email: null, // Students don't need email
+          password: hashedPassword,
+          role: UserRole.STUDENT as any,
+          isActive: true
+        });
+        await userRepository.save(user);
+        
+        // Link user to student
+        student.userId = user.id;
+        await studentRepository.save(student);
+        console.log('[Student Login] Created new user account with Student ID as username:', username);
+      }
+    } else if (user) {
+      // User exists, verify the username matches the Student ID
+      if (user.username !== student.studentNumber) {
+        console.log('[Student Login] Username mismatch:', { 
+          userUsername: user.username, 
+          studentNumber: student.studentNumber 
+        });
+        // Update username to match Student ID
+        user.username = student.studentNumber;
+        await userRepository.save(user);
+        console.log('[Student Login] Updated username to match Student ID:', student.studentNumber);
+      }
+    }
+
+    if (!user || !user.isActive) {
+      return res.status(401).json({ message: 'Account is inactive. Please contact the administrator.' });
+    }
+
+    // Generate JWT token
+    const secret = process.env.JWT_SECRET;
+    if (!secret) {
+      return res.status(500).json({ message: 'Server configuration error' });
+    }
+    const expiresIn = process.env.JWT_EXPIRES_IN || '30m';
+    // @ts-ignore - expiresIn accepts string values like '7d' which is valid
+    const token = jwt.sign(
+      { userId: user.id, role: user.role },
+      secret,
+      { expiresIn }
+    );
+
+    // Build response
+    const response: any = {
+      token,
+      user: {
+        id: user.id,
+        username: user.username,
+        role: user.role,
+        student: {
+          id: student.id,
+          studentNumber: student.studentNumber,
+          firstName: student.firstName,
+          lastName: student.lastName,
+          dateOfBirth: student.dateOfBirth,
+          classId: student.classId,
+          classEntity: student.classEntity ? {
+            id: student.classEntity.id,
+            name: student.classEntity.name,
+            form: student.classEntity.form
+          } : null
+        }
+      }
+    };
+
+    console.log('[Student Login] Student authenticated:', student.studentNumber);
+    res.json(response);
+  } catch (error: any) {
+    console.error('Student login error:', error);
+    res.status(500).json({ message: 'Server error', error: error.message });
   }
 };

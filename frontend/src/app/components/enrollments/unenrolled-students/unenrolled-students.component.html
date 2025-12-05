@@ -41,7 +41,7 @@
   <!-- Students List -->
   <div class="students-grid" *ngIf="!loading">
     <div 
-      *ngFor="let student of filteredStudents" 
+      *ngFor="let student of paginatedStudents" 
       class="student-card">
       <div class="student-header">
         <div class="student-avatar">
@@ -94,8 +94,27 @@
   <!-- Results Summary -->
   <div class="results-summary" *ngIf="!loading && filteredStudents.length > 0">
     <span class="summary-text">
-      Showing {{ filteredStudents.length }} unenrolled student{{ filteredStudents.length !== 1 ? 's' : '' }}
+      Showing {{ paginatedStudents.length }} of {{ filteredStudents.length }} unenrolled student{{ filteredStudents.length !== 1 ? 's' : '' }}
     </span>
+  </div>
+
+  <!-- Pagination -->
+  <div class="pagination-bar" *ngIf="!loading && filteredStudents.length > 0 && (pagination.totalPages > 1 || pagination.total > pagination.limit)">
+    <button class="btn btn-secondary" (click)="changePage(pagination.page - 1)" [disabled]="pagination.page === 1">
+      ‹ Previous
+    </button>
+    <span class="page-info">
+      Page {{ pagination.page }} of {{ pagination.totalPages }} • {{ pagination.total }} student{{ pagination.total !== 1 ? 's' : '' }}
+    </span>
+    <button class="btn btn-secondary" (click)="changePage(pagination.page + 1)" [disabled]="pagination.page === pagination.totalPages">
+      Next ›
+    </button>
+    <div class="page-size-selector">
+      <label for="unenrolledPageSize">Rows per page:</label>
+      <select id="unenrolledPageSize" (change)="changePageSize($event.target.value)" [value]="pagination.limit">
+        <option *ngFor="let size of pageSizeOptions" [value]="size">{{ size }}</option>
+      </select>
+    </div>
   </div>
 </div>
 

@@ -1,0 +1,55 @@
+<div class="student-dashboard-container">
+  <!-- Main Content -->
+  <main class="main-content">
+    <div class="dashboard-header">
+      <div>
+        <h1>Student Dashboard</h1>
+        <p class="welcome-text">Welcome, {{ studentName }}</p>
+      </div>
+    </div>
+
+    <div class="alert alert-error" *ngIf="error" style="color: red; font-weight: bold;">{{ error }}</div>
+
+    <!-- Quick Actions -->
+    <div class="quick-actions-section">
+      <h3>Quick Actions</h3>
+      <div class="quick-actions-grid">
+        <button 
+          class="quick-action-btn" 
+          (click)="viewReportCard()">
+          <span class="action-icon">📄</span>
+          <span class="action-label">My Report Card</span>
+          <span class="action-hint">View and download your report card for the active term</span>
+        </button>
+        <button 
+          class="quick-action-btn" 
+          (click)="viewInvoiceStatement()">
+          <span class="action-icon">💰</span>
+          <span class="action-label">My Invoice Statement</span>
+          <span class="action-hint">View and download your current invoice balance</span>
+        </button>
+      </div>
+    </div>
+
+    <!-- Information Cards -->
+    <div class="info-cards-section">
+      <div class="info-card">
+        <div class="info-card-icon">📄</div>
+        <div class="info-card-content">
+          <h4>Report Card</h4>
+          <p>Access your academic performance report card for the current active term. View your grades, subject scores, and overall performance.</p>
+          <button class="btn btn-primary" (click)="viewReportCard()">View Report Card</button>
+        </div>
+      </div>
+      <div class="info-card">
+        <div class="info-card-icon">💰</div>
+        <div class="info-card-content">
+          <h4>Invoice Statement</h4>
+          <p>View your current invoice balance, payment history, and download your invoice statement.</p>
+          <button class="btn btn-primary" (click)="viewInvoiceStatement()">View Invoice</button>
+        </div>
+      </div>
+    </div>
+  </main>
+</div>
+

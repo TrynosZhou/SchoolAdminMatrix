@@ -3,6 +3,7 @@ import { AppDataSource } from '../config/database';
 import { Student } from '../entities/Student';
 import { User, UserRole } from '../entities/User';
 import { Class } from '../entities/Class';
+import { Teacher } from '../entities/Teacher';
 import { StudentEnrollment } from '../entities/StudentEnrollment';
 import { Marks } from '../entities/Marks';
 import { Invoice, InvoiceStatus } from '../entities/Invoice';
@@ -18,6 +19,7 @@ import { parseAmount } from '../utils/numberUtils';
 import { calculateAge } from '../utils/ageUtils';
 import { In } from 'typeorm';
 import { buildPaginationResponse, parsePaginationParams } from '../utils/pagination';
+import { createClassListPDF } from '../utils/classListPdfGenerator';
 
 export const registerStudent = async (req: AuthRequest, res: Response) => {
   try {
@@ -1001,6 +1003,1028 @@ export const getTransportServicesReport = async (req: AuthRequest, res: Response
   } catch (error) {
     console.error('Error fetching Transport Services report:', error);
     res.status(500).json({ message: 'Failed to fetch Transport Services report', error: error instanceof Error ? error.message : 'Unknown error' });
+  }
+};
+
+// Generate Class List PDF
+export const generateClassListPDF = async (req: AuthRequest, res: Response) => {
+  try {
+    console.log('[generateClassListPDF] Route handler called');
+    console.log('[generateClassListPDF] Query params:', req.query);
+    
+    if (!AppDataSource.isInitialized) {
+      await AppDataSource.initialize();
+    }
+
+    const { classId, term } = req.query;
+
+    if (!classId || !term) {
+      return res.status(400).json({ message: 'Class ID and term are required' });
+    }
+
+    const studentRepository = AppDataSource.getRepository(Student);
+    const classRepository = AppDataSource.getRepository(Class);
+    const settingsRepository = AppDataSource.getRepository(Settings);
+
+    // Get class information
+    const classEntity = await classRepository.findOne({
+      where: { id: classId as string }
+    });
+
+    if (!classEntity) {
+      return res.status(404).json({ message: 'Class not found' });
+    }
+
+    // For teachers, verify they are assigned to this class
+    const user = req.user;
+    if (user?.role === 'teacher' && user?.teacher?.id) {
+      const teacherRepository = AppDataSource.getRepository(Teacher);
+      const teacher = await teacherRepository.findOne({
+        where: { id: user.teacher.id },
+        relations: ['classes']
+      });
+
+      if (!teacher || !teacher.classes?.some(c => c.id === classId)) {
+        return res.status(403).json({ message: 'You are not assigned to this class' });
+      }
+    }
+
+    // Get all enrolled students in the class
+    const students = await studentRepository.find({
+      where: {
+        classId: classId as string,
+        enrollmentStatus: 'Enrolled',
+        isActive: true
+      },
+      order: { lastName: 'ASC', firstName: 'ASC' }
+    });
+
+    // Get settings for PDF header
+    const settings = await settingsRepository.findOne({
+      where: {},
+      order: { createdAt: 'DESC' }
+    });
+
+    // Format student data for PDF
+    const studentData = students.map(student => ({
+      studentNumber: student.studentNumber || '',
+      firstName: student.firstName || '',
+      lastName: student.lastName || '',
+      gender: student.gender || '',
+      dateOfBirth: student.dateOfBirth || '',
+      studentType: student.studentType || '',
+      contactNumber: student.contactNumber || student.phoneNumber || ''
+    }));
+
+    // Generate PDF
+    const pdfBuffer = await createClassListPDF({
+      class: {
+        id: classEntity.id,
+        name: classEntity.name,
+        form: classEntity.form || ''
+      },
+      term: term as string,
+      students: studentData,
+      generatedAt: new Date()
+    }, settings);
+
+    res.setHeader('Content-Type', 'application/pdf');
+    const fileName = `${classEntity.name.replace(/[^a-zA-Z0-9]/g, '_')}_${term}_ClassList.pdf`;
+    res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
+    return res.send(pdfBuffer);
+  } catch (error: any) {
+    console.error('Error generating class list PDF:', error);
+    res.status(500).json({
+      message: 'Failed to generate class list PDF',
+      error: error.message || 'Unknown error'
+    });
+  }
+};
+
+// Get student's report card for active term
+export const getStudentReportCard = async (req: AuthRequest, res: Response) => {
+  try {
+    console.log('[getStudentReportCard] Endpoint called');
+    
+    if (!AppDataSource.isInitialized) {
+      await AppDataSource.initialize();
+    }
+
+    const user = req.user;
+    if (!user) {
+      console.error('[getStudentReportCard] No user in request');
+      return res.status(401).json({ message: 'Authentication required' });
+    }
+
+    console.log('[getStudentReportCard] User authenticated:', { userId: user.id, role: user.role });
+
+    // Check if user is a student
+    if (user.role !== UserRole.STUDENT) {
+      console.log('[getStudentReportCard] User role mismatch:', { userId: user.id, role: user.role });
+      return res.status(403).json({ message: 'Access denied. Student access required.' });
+    }
+
+    // If user.student is not loaded, try to load it
+    let studentId: string;
+    const studentRepository = AppDataSource.getRepository(Student);
+    
+    if (!user.student) {
+      console.log('[getStudentReportCard] Student relation not loaded, fetching from userId:', user.id);
+      const student = await studentRepository.findOne({
+        where: { userId: user.id }
+      });
+      if (!student) {
+        return res.status(404).json({ message: 'Student record not found for this user' });
+      }
+      studentId = student.id;
+    } else {
+      studentId = user.student.id;
+    }
+
+    const student = await studentRepository.findOne({
+      where: { id: studentId },
+      relations: ['classEntity']
+    });
+
+    if (!student || !student.classId) {
+      return res.status(404).json({ message: 'Student not found or not enrolled in a class' });
+    }
+
+    // Get settings (for grades, school info, etc.)
+    const { Settings } = await import('../entities/Settings');
+    const settingsRepository = AppDataSource.getRepository(Settings);
+    const settingsList = await settingsRepository.find({
+      order: { createdAt: 'DESC' },
+      take: 1
+    });
+    const settings = settingsList.length > 0 ? settingsList[0] : null;
+    const activeTerm = settings?.activeTerm || settings?.currentTerm;
+    
+    if (!activeTerm) {
+      console.error('[getStudentReportCard] Active term not set in settings');
+      return res.status(400).json({ 
+        message: 'Active term not set in settings. Please contact the administrator.' 
+      });
+    }
+    
+    console.log('[getStudentReportCard] Active term:', activeTerm);
+    
+    // Get grade thresholds and labels from settings
+    const thresholds = settings?.gradeThresholds || {
+      excellent: 90,
+      veryGood: 80,
+      good: 60,
+      satisfactory: 40,
+      needsImprovement: 20,
+      basic: 1
+    };
+
+    const gradeLabels = settings?.gradeLabels || {
+      excellent: 'OUTSTANDING',
+      veryGood: 'VERY HIGH',
+      good: 'HIGH',
+      satisfactory: 'GOOD',
+      needsImprovement: 'ASPIRING',
+      basic: 'BASIC',
+      fail: 'UNCLASSIFIED'
+    };
+
+    if (!activeTerm) {
+      return res.status(400).json({ message: 'Active term not set in settings' });
+    }
+
+    // Get report card using exam controller logic
+    // We'll use the existing getReportCard endpoint logic
+    const { getReportCard } = await import('./exam.controller');
+    
+    // Create a mock request object for getReportCard
+    const mockReq: any = {
+      ...req,
+      query: {
+        classId: student.classId,
+        examType: 'End of Term', // Default to End of Term
+        term: activeTerm,
+        studentId: studentId
+      },
+      user: user
+    };
+
+    // Call getReportCard and return the first report card (for this student)
+    const { getReportCard: getReportCardFunc } = await import('./exam.controller');
+    
+    // Instead of calling directly, we'll fetch the data ourselves
+    const { Exam } = await import('../entities/Exam');
+    const { Marks } = await import('../entities/Marks');
+    const { Subject } = await import('../entities/Subject');
+    const { Class } = await import('../entities/Class');
+    
+    const examRepository = AppDataSource.getRepository(Exam);
+    const marksRepository = AppDataSource.getRepository(Marks);
+    const classRepository = AppDataSource.getRepository(Class);
+    
+    const classEntity = await classRepository.findOne({
+      where: { id: student.classId },
+      relations: ['subjects']
+    });
+
+    if (!classEntity) {
+      return res.status(404).json({ message: 'Class not found' });
+    }
+
+    console.log('[getStudentReportCard] Class entity loaded:', {
+      className: classEntity.name,
+      subjectsCount: classEntity.subjects?.length || 0,
+      subjects: classEntity.subjects?.map((s: any) => ({ name: s.name, code: s.code })) || []
+    });
+
+    // Get all End of Term exams for this class and term
+    const { ExamType } = await import('../entities/Exam');
+    const exams = await examRepository.find({
+      where: { 
+        classId: student.classId, 
+        type: ExamType.END_TERM, 
+        term: activeTerm 
+      },
+      relations: ['subjects']
+    });
+
+    if (exams.length === 0) {
+      console.warn('[getStudentReportCard] No End of Term exams found:', {
+        classId: student.classId,
+        className: classEntity.name,
+        term: activeTerm
+      });
+      // Return empty report card structure instead of 404
+      return res.json({
+        reportCard: {
+          student: {
+            id: student.id,
+            studentNumber: student.studentNumber,
+            firstName: student.firstName,
+            lastName: student.lastName,
+            class: classEntity.name,
+            form: classEntity.form,
+            classId: student.classId
+          },
+          term: activeTerm,
+          examType: 'End of Term',
+          subjects: [],
+          totalScore: 0,
+          totalMaxScore: 0,
+          overallPercentage: null,
+          remarks: {
+            classTeacherRemarks: null,
+            headmasterRemarks: null
+          },
+          settings: {
+            schoolName: settings?.schoolName || null,
+            schoolAddress: settings?.schoolAddress || null,
+            schoolPhone: settings?.schoolPhone || null,
+            academicYear: settings?.academicYear || null,
+            schoolLogo: settings?.schoolLogo || null,
+            schoolLogo2: settings?.schoolLogo2 || null
+          }
+        },
+        class: classEntity.name,
+        examType: 'End of Term',
+        term: activeTerm
+      });
+    }
+
+    // Get all marks for this student
+    const allMarks = await marksRepository.find({
+      where: { studentId: studentId },
+      relations: ['subject', 'exam']
+    }).catch(err => {
+      console.error('[getStudentReportCard] Error fetching marks:', err);
+      return [];
+    });
+
+    // Filter marks for this term's exams
+    const examIds = exams.map(e => e.id);
+    const studentMarks = allMarks.filter(m => examIds.includes(m.examId));
+
+    // Calculate class averages for each subject
+    // Get all marks for all students in the class for these exams
+    const allClassMarks = await marksRepository.find({
+      where: { examId: In(examIds) },
+      relations: ['subject', 'student']
+    });
+
+    // Filter to only students in the same class
+    const classMarks = allClassMarks.filter(m => m.student?.classId === student.classId);
+
+    // Calculate class averages by subject
+    const classAverages: { [key: string]: number } = {};
+    const marksBySubject: { [key: string]: any[] } = {};
+
+    // Group marks by subject
+    classMarks.forEach(mark => {
+      if (!mark.subject) return;
+      const subjectName = mark.subject.name;
+      if (!marksBySubject[subjectName]) {
+        marksBySubject[subjectName] = [];
+      }
+      marksBySubject[subjectName].push(mark);
+    });
+
+    // Calculate average for each subject
+    Object.keys(marksBySubject).forEach(subjectName => {
+      const subjectMarks = marksBySubject[subjectName];
+      const studentPercentages: number[] = [];
+      const studentMarksMap: { [key: string]: { scores: number[]; maxScores: number[]; percentages: number[] } } = {};
+
+      // Group by student
+      subjectMarks.forEach(mark => {
+        const sid = mark.studentId;
+        if (!studentMarksMap[sid]) {
+          studentMarksMap[sid] = { scores: [], maxScores: [], percentages: [] };
+        }
+
+        const hasScore = mark.score !== null && mark.score !== undefined;
+        const hasUniformMark = mark.uniformMark !== null && mark.uniformMark !== undefined;
+
+        if (hasScore || hasUniformMark) {
+          const maxScore = mark.maxScore && mark.maxScore > 0 ? parseFloat(String(mark.maxScore)) : 100;
+          const score = hasUniformMark ? parseFloat(String(mark.uniformMark)) : parseFloat(String(mark.score));
+          
+          if (!isNaN(score) && !isNaN(maxScore)) {
+            studentMarksMap[sid].scores.push(score);
+            studentMarksMap[sid].maxScores.push(maxScore);
+            const percentage = maxScore > 0 ? (score / maxScore) * 100 : 0;
+            studentMarksMap[sid].percentages.push(percentage);
+          }
+        }
+      });
+
+      // Calculate average percentage for each student, then average across all students
+      Object.keys(studentMarksMap).forEach(sid => {
+        const studentData = studentMarksMap[sid];
+        if (studentData.percentages.length > 0) {
+          const avgPercentage = studentData.percentages.reduce((a, b) => a + b, 0) / studentData.percentages.length;
+          studentPercentages.push(avgPercentage);
+        } else if (studentData.scores.length > 0 && studentData.maxScores.length > 0) {
+          const totalScore = studentData.scores.reduce((a, b) => a + b, 0);
+          const totalMaxScore = studentData.maxScores.reduce((a, b) => a + b, 0);
+          if (totalMaxScore > 0) {
+            const percentage = (totalScore / totalMaxScore) * 100;
+            studentPercentages.push(percentage);
+          }
+        }
+      });
+
+      // Calculate class average
+      if (studentPercentages.length > 0) {
+        const sumPercentages = studentPercentages.reduce((sum, p) => sum + p, 0);
+        classAverages[subjectName] = Math.round(sumPercentages / studentPercentages.length);
+      } else {
+        classAverages[subjectName] = 0;
+      }
+    });
+
+    // Group marks by subject
+    const subjectMarksMap: { [key: string]: { scores: number[]; maxScores: number[]; percentages: number[]; comments: string[] } } = {};
+
+    studentMarks.forEach(mark => {
+      if (!mark || !mark.subject) {
+        console.warn('[getStudentReportCard] Skipping mark with missing subject:', mark?.id);
+        return;
+      }
+      
+      const hasScore = mark.score !== null && mark.score !== undefined;
+      const hasUniformMark = mark.uniformMark !== null && mark.uniformMark !== undefined;
+      
+      if (!hasScore && !hasUniformMark) {
+        console.warn('[getStudentReportCard] Skipping mark with no score:', mark?.id);
+        return;
+      }
+      
+      const subjectName = mark.subject?.name;
+      if (!subjectName) {
+        console.warn('[getStudentReportCard] Skipping mark with invalid subject name:', mark?.id);
+        return;
+      }
+      
+      if (!subjectMarksMap[subjectName]) {
+        subjectMarksMap[subjectName] = { scores: [], maxScores: [], percentages: [], comments: [] };
+      }
+      
+      try {
+        const maxScore = mark.maxScore && mark.maxScore > 0 ? parseFloat(String(mark.maxScore)) : 100;
+        const score = hasUniformMark ? parseFloat(String(mark.uniformMark)) : parseFloat(String(mark.score));
+        
+        if (isNaN(score) || isNaN(maxScore)) {
+          console.warn('[getStudentReportCard] Invalid score values:', { score, maxScore, markId: mark.id });
+          return;
+        }
+        
+        const percentage = maxScore > 0 ? (score / maxScore) * 100 : 0;
+        
+        subjectMarksMap[subjectName].scores.push(score);
+        subjectMarksMap[subjectName].maxScores.push(maxScore);
+        subjectMarksMap[subjectName].percentages.push(percentage);
+        if (mark.comments) {
+          subjectMarksMap[subjectName].comments.push(mark.comments);
+        }
+      } catch (err) {
+        console.error('[getStudentReportCard] Error processing mark:', mark?.id, err);
+      }
+    });
+
+    // Grade calculation function - uses settings thresholds and labels
+    type GradeKey = 'excellent' | 'veryGood' | 'good' | 'satisfactory' | 'needsImprovement' | 'basic' | 'fail';
+    const getGradeInfo = (percentage: number | null): { key: GradeKey; label: string } => {
+      if (percentage === null || percentage === undefined || isNaN(percentage)) {
+        return { key: 'fail', label: gradeLabels.fail || 'N/A' };
+      }
+      if (percentage === 0) {
+        return { key: 'fail', label: gradeLabels.fail || 'UNCLASSIFIED' };
+      }
+      if (percentage >= (thresholds.excellent || 90)) {
+        return { key: 'excellent', label: gradeLabels.excellent || 'OUTSTANDING' };
+      }
+      if (percentage >= (thresholds.veryGood || 80)) {
+        return { key: 'veryGood', label: gradeLabels.veryGood || 'VERY HIGH' };
+      }
+      if (percentage >= (thresholds.good || 60)) {
+        return { key: 'good', label: gradeLabels.good || 'HIGH' };
+      }
+      if (percentage >= (thresholds.satisfactory || 40)) {
+        return { key: 'satisfactory', label: gradeLabels.satisfactory || 'GOOD' };
+      }
+      if (percentage >= (thresholds.needsImprovement || 20)) {
+        return { key: 'needsImprovement', label: gradeLabels.needsImprovement || 'ASPIRING' };
+      }
+      if (percentage >= (thresholds.basic || 1)) {
+        return { key: 'basic', label: gradeLabels.basic || 'BASIC' };
+      }
+      return { key: 'fail', label: gradeLabels.fail || 'UNCLASSIFIED' };
+    };
+
+    // Build report card data - include ALL subjects from the class OR from marks if class has no subjects
+    console.log('[getStudentReportCard] Building subjects array. Class subjects count:', classEntity.subjects?.length || 0);
+    console.log('[getStudentReportCard] Subject marks map keys:', Object.keys(subjectMarksMap));
+    console.log('[getStudentReportCard] Class subjects details:', classEntity.subjects?.map((s: any) => ({ 
+      id: s.id, 
+      name: s.name, 
+      code: s.code 
+    })) || []);
+    
+    // If class has no subjects but we have marks, extract subject info from marks
+    let subjectsToProcess: any[] = [];
+    
+    if (classEntity.subjects && classEntity.subjects.length > 0) {
+      // Use subjects from class
+      subjectsToProcess = classEntity.subjects;
+      console.log('[getStudentReportCard] Using subjects from class entity');
+    } else {
+      // Class has no subjects assigned, but we have marks - build subjects from marks
+      console.warn('[getStudentReportCard] Class has no subjects assigned, building from marks:', {
+        classId: classEntity.id,
+        className: classEntity.name,
+        marksSubjects: Object.keys(subjectMarksMap)
+      });
+      
+      // Extract unique subjects from student marks (marks already have subject relations loaded)
+      const subjectMap = new Map<string, any>();
+      
+      studentMarks.forEach(mark => {
+        if (mark.subject && mark.subject.name) {
+          const subjectName = mark.subject.name;
+          if (!subjectMap.has(subjectName)) {
+            subjectMap.set(subjectName, {
+              id: mark.subject.id,
+              name: mark.subject.name,
+              code: mark.subject.code || ''
+            });
+          }
+        }
+      });
+      
+      // Convert map to array
+      subjectsToProcess = Array.from(subjectMap.values());
+      
+      console.log('[getStudentReportCard] Built subjects from marks:', subjectsToProcess.map(s => ({ name: s.name, code: s.code })));
+      
+      // If still no subjects, try fetching from Subject repository by name
+      if (subjectsToProcess.length === 0 && Object.keys(subjectMarksMap).length > 0) {
+        const subjectRepository = AppDataSource.getRepository(Subject);
+        const subjectNames = Object.keys(subjectMarksMap);
+        const subjectsFromDb = await subjectRepository.find({
+          where: subjectNames.map(name => ({ name }))
+        });
+        
+        subjectsToProcess = subjectsFromDb.map(s => ({
+          id: s.id,
+          name: s.name,
+          code: s.code || ''
+        }));
+        
+        console.log('[getStudentReportCard] Fetched subjects from repository:', subjectsToProcess.map(s => ({ name: s.name, code: s.code })));
+      }
+    }
+    
+    const subjects = subjectsToProcess.map(subject => {
+      const marks = subjectMarksMap[subject.name] || { scores: [], maxScores: [], percentages: [], comments: [] };
+      const avgScore = marks.scores.length > 0 
+        ? marks.scores.reduce((a, b) => a + b, 0) / marks.scores.length 
+        : null;
+      const avgPercentage = marks.percentages.length > 0
+        ? marks.percentages.reduce((a, b) => a + b, 0) / marks.percentages.length
+        : null;
+      // For possible mark, use the average max score (typically 100)
+      const avgMaxScore = marks.maxScores.length > 0 
+        ? marks.maxScores.reduce((a, b) => a + b, 0) / marks.maxScores.length 
+        : 100;
+      const classAverage = classAverages[subject.name] || 0;
+      
+      const gradeInfo = getGradeInfo(avgPercentage);
+      
+      const subjectData = {
+        id: subject.id,
+        name: subject.name || 'Unknown Subject',
+        code: subject.code || '',
+        score: avgScore ? Math.round(avgScore) : null,
+        maxScore: Math.round(avgMaxScore),
+        percentage: avgPercentage,
+        classAverage: classAverage,
+        grade: gradeInfo.label,
+        comment: marks.comments.length > 0 ? marks.comments.join(', ') : null
+      };
+      
+      console.log('[getStudentReportCard] Subject data:', {
+        name: subjectData.name,
+        code: subjectData.code,
+        score: subjectData.score,
+        grade: subjectData.grade,
+        hasComment: !!subjectData.comment
+      });
+      
+      return subjectData;
+    });
+    
+    console.log('[getStudentReportCard] Total subjects in report card:', subjects.length);
+    console.log('[getStudentReportCard] Sample subject data:', subjects.length > 0 ? subjects[0] : 'No subjects');
+
+    const totalScore = subjects.reduce((sum, s) => sum + (s.score || 0), 0);
+    const totalMaxScore = subjects.reduce((sum, s) => sum + (s.maxScore || 0), 0);
+    const overallPercentage = totalMaxScore > 0 ? (totalScore / totalMaxScore) * 100 : null;
+
+    // Fetch remarks from ReportCardRemarks entity
+    const remarksRepository = AppDataSource.getRepository(ReportCardRemarks);
+    const remarks = await remarksRepository.findOne({
+      where: {
+        studentId: studentId,
+        classId: student.classId,
+        examType: 'end_term' // Match the ExamType.END_TERM value
+      }
+    });
+
+    // Log if no subjects found, but still return the report card structure
+    if (!subjects || subjects.length === 0) {
+      console.warn('[getStudentReportCard] No subjects found for class:', {
+        className: classEntity.name,
+        classId: student.classId,
+        classSubjectsCount: classEntity.subjects?.length || 0
+      });
+      // Still return the report card structure with empty subjects array
+      // The frontend will handle displaying a message
+    }
+
+    const reportCard = {
+      student: {
+        id: student.id,
+        studentNumber: student.studentNumber,
+        firstName: student.firstName,
+        lastName: student.lastName,
+        class: classEntity.name,
+        form: classEntity.form,
+        classId: student.classId
+      },
+      term: activeTerm,
+      examType: 'End of Term', // Display name for END_TERM
+      subjects: subjects,
+      totalScore: totalScore,
+      totalMaxScore: totalMaxScore,
+      overallPercentage: overallPercentage,
+      remarks: {
+        classTeacherRemarks: remarks?.classTeacherRemarks || null,
+        headmasterRemarks: remarks?.headmasterRemarks || null
+      },
+      settings: {
+        schoolName: settings?.schoolName || null,
+        schoolAddress: settings?.schoolAddress || null,
+        schoolPhone: settings?.schoolPhone || null,
+        academicYear: settings?.academicYear || null,
+        schoolLogo: settings?.schoolLogo || null,
+        schoolLogo2: settings?.schoolLogo2 || null
+      }
+    };
+
+    console.log('[getStudentReportCard] Sending report card response:', {
+      studentId: student.id,
+      studentNumber: student.studentNumber,
+      subjectsCount: subjects.length,
+      hasSettings: !!settings
+    });
+
+    res.json({ reportCard, class: classEntity.name, examType: 'End of Term', term: activeTerm });
+  } catch (error: any) {
+    console.error('[getStudentReportCard] Error fetching student report card:', error);
+    console.error('[getStudentReportCard] Error stack:', error.stack);
+    res.status(500).json({ 
+      message: 'Server error while fetching report card', 
+      error: process.env.NODE_ENV === 'development' ? error.message : 'An error occurred'
+    });
+  }
+};
+
+// Download student's report card as PDF
+export const downloadStudentReportCardPDF = async (req: AuthRequest, res: Response) => {
+  try {
+    console.log('[downloadStudentReportCardPDF] Endpoint called');
+    
+    if (!AppDataSource.isInitialized) {
+      await AppDataSource.initialize();
+    }
+
+    const user = req.user;
+    if (!user) {
+      console.error('[downloadStudentReportCardPDF] No user in request');
+      return res.status(401).json({ message: 'Authentication required' });
+    }
+
+    console.log('[downloadStudentReportCardPDF] User authenticated:', { userId: user.id, role: user.role });
+
+    // Check if user is a student
+    if (user.role !== UserRole.STUDENT) {
+      console.log('[downloadStudentReportCardPDF] User role mismatch:', { userId: user.id, role: user.role });
+      return res.status(403).json({ message: 'Access denied. Student access required.' });
+    }
+
+    // Get student ID
+    let studentId: string;
+    const studentRepository = AppDataSource.getRepository(Student);
+    
+    if (!user.student) {
+      console.log('[downloadStudentReportCardPDF] Student relation not loaded, fetching from userId:', user.id);
+      const student = await studentRepository.findOne({
+        where: { userId: user.id }
+      });
+      if (!student) {
+        return res.status(404).json({ message: 'Student record not found for this user' });
+      }
+      studentId = student.id;
+    } else {
+      studentId = user.student.id;
+    }
+
+    const student = await studentRepository.findOne({
+      where: { id: studentId },
+      relations: ['classEntity']
+    });
+
+    if (!student || !student.classId) {
+      return res.status(404).json({ message: 'Student not found or not enrolled in a class' });
+    }
+
+    // Get settings
+    const { Settings } = await import('../entities/Settings');
+    const settingsRepository = AppDataSource.getRepository(Settings);
+    const settingsList = await settingsRepository.find({
+      order: { createdAt: 'DESC' },
+      take: 1
+    });
+    const settings = settingsList.length > 0 ? settingsList[0] : null;
+    const activeTerm = settings?.activeTerm || settings?.currentTerm;
+
+    if (!activeTerm) {
+      return res.status(400).json({ message: 'Active term not set in settings' });
+    }
+
+    // Get the report card data (reuse the logic from getStudentReportCard)
+    // We'll call the same logic but format it for PDF generation
+    const { Exam } = await import('../entities/Exam');
+    const { Marks } = await import('../entities/Marks');
+    const { Subject } = await import('../entities/Subject');
+    const { Class } = await import('../entities/Class');
+    const { ExamType } = await import('../entities/Exam');
+    const { ReportCardRemarks } = await import('../entities/ReportCardRemarks');
+    
+    const examRepository = AppDataSource.getRepository(Exam);
+    const marksRepository = AppDataSource.getRepository(Marks);
+    const classRepository = AppDataSource.getRepository(Class);
+
+    const classEntity = await classRepository.findOne({
+      where: { id: student.classId },
+      relations: ['subjects']
+    });
+
+    if (!classEntity) {
+      return res.status(404).json({ message: 'Class not found' });
+    }
+
+    // Get End of Term exams for the active term
+    const exams = await examRepository.find({
+      where: {
+        classId: student.classId,
+        type: ExamType.END_TERM,
+        term: activeTerm
+      },
+      relations: ['subjects']
+    });
+
+    if (exams.length === 0) {
+      return res.status(404).json({ message: `No End of Term exams found for ${activeTerm}` });
+    }
+
+    // Get all marks for this student
+    const allMarks = await marksRepository.find({
+      where: { studentId: studentId },
+      relations: ['subject', 'exam']
+    }).catch(err => {
+      console.error('[downloadStudentReportCardPDF] Error fetching marks:', err);
+      return [];
+    });
+
+    const examIds = exams.map(e => e.id);
+    const studentMarks = allMarks.filter(m => examIds.includes(m.examId));
+
+    // Group marks by subject and calculate averages
+    const subjectMarksMap: { [key: string]: { scores: number[]; maxScores: number[]; percentages: number[]; comments: string[] } } = {};
+
+    studentMarks.forEach(mark => {
+      if (!mark || !mark.subject) return;
+      
+      const hasScore = mark.score !== null && mark.score !== undefined;
+      const hasUniformMark = mark.uniformMark !== null && mark.uniformMark !== undefined;
+      
+      if (!hasScore && !hasUniformMark) return;
+      
+      const subjectName = mark.subject?.name;
+      if (!subjectName) return;
+      
+      if (!subjectMarksMap[subjectName]) {
+        subjectMarksMap[subjectName] = { scores: [], maxScores: [], percentages: [], comments: [] };
+      }
+      
+      try {
+        const maxScore = mark.maxScore && mark.maxScore > 0 ? parseFloat(String(mark.maxScore)) : 100;
+        const score = hasUniformMark ? parseFloat(String(mark.uniformMark)) : parseFloat(String(mark.score));
+        
+        if (isNaN(score) || isNaN(maxScore)) return;
+        
+        const percentage = maxScore > 0 ? (score / maxScore) * 100 : 0;
+        
+        subjectMarksMap[subjectName].scores.push(score);
+        subjectMarksMap[subjectName].maxScores.push(maxScore);
+        subjectMarksMap[subjectName].percentages.push(percentage);
+        if (mark.comments) {
+          subjectMarksMap[subjectName].comments.push(mark.comments);
+        }
+      } catch (err) {
+        console.error('[downloadStudentReportCardPDF] Error processing mark:', err);
+      }
+    });
+
+    // Build subjects array
+    let subjectsToProcess: any[] = [];
+    
+    if (classEntity.subjects && classEntity.subjects.length > 0) {
+      subjectsToProcess = classEntity.subjects;
+    } else {
+      // Extract subjects from marks
+      const subjectMap = new Map<string, any>();
+      studentMarks.forEach(mark => {
+        if (mark.subject && mark.subject.name) {
+          const subjectName = mark.subject.name;
+          if (!subjectMap.has(subjectName)) {
+            subjectMap.set(subjectName, {
+              id: mark.subject.id,
+              name: mark.subject.name,
+              code: mark.subject.code || ''
+            });
+          }
+        }
+      });
+      subjectsToProcess = Array.from(subjectMap.values());
+    }
+
+    // Get grade thresholds
+    const thresholds = settings?.gradeThresholds || {
+      excellent: 90, veryGood: 80, good: 70, satisfactory: 60,
+      needsImprovement: 50, basic: 20, fail: 0
+    };
+    const gradeLabels = settings?.gradeLabels || {
+      excellent: 'EXCELLENT', veryGood: 'VERY GOOD', good: 'GOOD',
+      satisfactory: 'SATISFACTORY', needsImprovement: 'NEEDS IMPROVEMENT',
+      basic: 'BASIC', fail: 'FAIL'
+    };
+
+    const getGradeInfo = (percentage: number | null): string => {
+      if (percentage === null || percentage === undefined || isNaN(percentage)) {
+        return gradeLabels.fail || 'N/A';
+      }
+      if (percentage >= (thresholds.excellent || 90)) return gradeLabels.excellent || 'EXCELLENT';
+      if (percentage >= (thresholds.veryGood || 80)) return gradeLabels.veryGood || 'VERY GOOD';
+      if (percentage >= (thresholds.good || 70)) return gradeLabels.good || 'GOOD';
+      if (percentage >= (thresholds.satisfactory || 60)) return gradeLabels.satisfactory || 'SATISFACTORY';
+      if (percentage >= (thresholds.needsImprovement || 50)) return gradeLabels.needsImprovement || 'NEEDS IMPROVEMENT';
+      if (percentage >= (thresholds.basic || 20)) return gradeLabels.basic || 'BASIC';
+      return gradeLabels.fail || 'FAIL';
+    };
+
+    const subjects = subjectsToProcess.map(subject => {
+      const marks = subjectMarksMap[subject.name] || { scores: [], maxScores: [], percentages: [], comments: [] };
+      const avgScore = marks.scores.length > 0 
+        ? marks.scores.reduce((a, b) => a + b, 0) / marks.scores.length 
+        : null;
+      const avgPercentage = marks.percentages.length > 0
+        ? marks.percentages.reduce((a, b) => a + b, 0) / marks.percentages.length
+        : null;
+      const avgMaxScore = marks.maxScores.length > 0 
+        ? marks.maxScores.reduce((a, b) => a + b, 0) / marks.maxScores.length 
+        : 100;
+      
+      const gradeInfo = getGradeInfo(avgPercentage);
+      
+      return {
+        subject: subject.name || 'Unknown Subject',
+        subjectCode: subject.code || '',
+        score: avgScore ? Math.round(avgScore) : 0,
+        maxScore: Math.round(avgMaxScore),
+        percentage: avgPercentage ? Math.round(avgPercentage).toString() : '0',
+        grade: gradeInfo,
+        comments: marks.comments.length > 0 ? marks.comments.join('; ') : undefined
+      };
+    });
+
+    const totalScore = subjects.reduce((sum, s) => sum + (s.score || 0), 0);
+    const totalMaxScore = subjects.reduce((sum, s) => sum + (s.maxScore || 0), 0);
+    const overallPercentage = totalMaxScore > 0 ? (totalScore / totalMaxScore) * 100 : 0;
+
+    // Get remarks
+    const remarksRepository = AppDataSource.getRepository(ReportCardRemarks);
+    const remarks = await remarksRepository.findOne({
+      where: {
+        studentId: studentId,
+        classId: student.classId,
+        examType: 'end_term'
+      }
+    });
+
+    // Format data for PDF generator
+    const reportCardData = {
+      student: {
+        id: student.id,
+        name: `${student.firstName} ${student.lastName}`,
+        studentNumber: student.studentNumber,
+        class: classEntity.name
+      },
+      examType: 'End of Term',
+      subjects: subjects,
+      overallAverage: Math.round(overallPercentage).toString(),
+      overallGrade: getGradeInfo(overallPercentage),
+      classPosition: 0, // Not calculated for student view
+      formPosition: 0,
+      totalStudents: 0,
+      remarks: {
+        classTeacherRemarks: remarks?.classTeacherRemarks || null,
+        headmasterRemarks: remarks?.headmasterRemarks || null
+      },
+      generatedAt: new Date()
+    };
+
+    // Generate PDF
+    const { createReportCardPDF } = await import('../utils/pdfGenerator');
+    const pdfBuffer = await createReportCardPDF(reportCardData, settings);
+
+    // Set response headers
+    const studentName = `${student.firstName}-${student.lastName}`.replace(/[^a-zA-Z0-9\s-]/g, '').replace(/\s+/g, '-');
+    const filename = `${studentName}-ReportCard-${activeTerm.replace(/\s+/g, '-')}.pdf`;
+
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename=${filename}`);
+    res.send(pdfBuffer);
+
+    console.log('[downloadStudentReportCardPDF] PDF sent successfully');
+  } catch (error: any) {
+    console.error('[downloadStudentReportCardPDF] Error generating PDF:', error);
+    console.error('[downloadStudentReportCardPDF] Error stack:', error.stack);
+    res.status(500).json({ 
+      message: 'Server error while generating PDF', 
+      error: process.env.NODE_ENV === 'development' ? error.message : 'An error occurred'
+    });
+  }
+};
+
+// Get student's invoice balance
+export const getStudentInvoiceBalance = async (req: AuthRequest, res: Response) => {
+  try {
+    if (!AppDataSource.isInitialized) {
+      await AppDataSource.initialize();
+    }
+
+    const user = req.user;
+    if (!user) {
+      return res.status(401).json({ message: 'Authentication required' });
+    }
+
+    // Check if user is a student
+    if (user.role !== UserRole.STUDENT) {
+      console.log('[getStudentInvoiceBalance] User role mismatch:', { userId: user.id, role: user.role });
+      return res.status(403).json({ message: 'Access denied. Student access required.' });
+    }
+
+    // If user.student is not loaded, try to load it
+    let studentId: string;
+    if (!user.student) {
+      console.log('[getStudentInvoiceBalance] Student relation not loaded, fetching from userId:', user.id);
+      const studentRepository = AppDataSource.getRepository(Student);
+      const student = await studentRepository.findOne({
+        where: { userId: user.id }
+      });
+      if (!student) {
+        return res.status(404).json({ message: 'Student record not found for this user' });
+      }
+      studentId = student.id;
+    } else {
+      studentId = user.student.id;
+    }
+    
+    // Use existing finance controller logic
+    const { getStudentBalance } = await import('./finance.controller');
+    
+    // Create a mock request
+    const mockReq: any = {
+      ...req,
+      query: { studentId: studentId },
+      user: user
+    };
+
+    // Call getStudentBalance
+    const { getStudentBalance: getStudentBalanceFunc } = await import('./finance.controller');
+    
+    // Instead, fetch directly
+    const { Invoice } = await import('../entities/Invoice');
+    const invoiceRepository = AppDataSource.getRepository(Invoice);
+    const studentRepository = AppDataSource.getRepository(Student);
+    
+    const student = await studentRepository.findOne({
+      where: { id: studentId },
+      relations: ['classEntity']
+    });
+
+    if (!student) {
+      return res.status(404).json({ message: 'Student not found' });
+    }
+
+    // Get the latest invoice
+    const lastInvoice = await invoiceRepository.findOne({
+      where: { studentId: studentId },
+      order: { createdAt: 'DESC' }
+    });
+
+    // Parse amounts (helper function from finance controller)
+    const parseAmount = (value: any): number => {
+      if (value === null || value === undefined) return 0;
+      if (typeof value === 'number') return value;
+      if (typeof value === 'string') {
+        const parsed = parseFloat(value.replace(/[^0-9.-]/g, ''));
+        return isNaN(parsed) ? 0 : parsed;
+      }
+      return 0;
+    };
+
+    const balance = parseAmount(lastInvoice?.balance);
+    const lastInvoiceAmount = parseAmount(lastInvoice?.amount);
+    const previousBalance = parseAmount(lastInvoice?.previousBalance);
+    const paidAmount = parseAmount(lastInvoice?.paidAmount);
+    const prepaidAmount = parseAmount(lastInvoice?.prepaidAmount);
+
+    res.json({
+      studentId: student.id,
+      studentNumber: student.studentNumber,
+      firstName: student.firstName,
+      lastName: student.lastName,
+      fullName: `${student.lastName} ${student.firstName}`,
+      balance: balance,
+      prepaidAmount: prepaidAmount,
+      lastInvoiceId: lastInvoice?.id || null,
+      lastInvoiceNumber: lastInvoice?.invoiceNumber || null,
+      lastInvoiceTerm: lastInvoice?.term || null,
+      lastInvoiceDate: lastInvoice?.createdAt || null,
+      lastInvoiceAmount: lastInvoiceAmount,
+      lastInvoicePreviousBalance: previousBalance,
+      lastInvoicePaidAmount: paidAmount,
+      lastInvoiceBalance: balance
+    });
+  } catch (error: any) {
+    console.error('Error fetching student invoice balance:', error);
+    res.status(500).json({ 
+      message: 'Server error', 
+      error: error.message || 'Unknown error' 
+    });
   }
 };
 

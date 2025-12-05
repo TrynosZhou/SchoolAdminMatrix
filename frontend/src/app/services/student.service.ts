@@ -176,5 +176,26 @@ export class StudentService {
   getTransportServicesReport(): Observable<any> {
     return this.http.get(`${this.apiUrl}/students/reports/transport-services`);
   }
+
+  downloadClassListPDF(classId: string, term: string): Observable<Blob> {
+    return this.http.get(`${this.apiUrl}/students/class-list/pdf`, {
+      params: { classId, term },
+      responseType: 'blob'
+    });
+  }
+
+  getStudentReportCard(): Observable<any> {
+    return this.http.get(`${this.apiUrl}/students/dashboard/report-card`);
+  }
+
+  downloadStudentReportCardPDF(): Observable<Blob> {
+    return this.http.get(`${this.apiUrl}/students/dashboard/report-card/pdf`, {
+      responseType: 'blob'
+    });
+  }
+
+  getStudentInvoiceBalance(): Observable<any> {
+    return this.http.get(`${this.apiUrl}/students/dashboard/invoice-balance`);
+  }
 }
 

@@ -1,0 +1,225 @@
+import { Component, OnInit } from '@angular/core';
+import { StudentService } from '../../../services/student.service';
+import { ClassService } from '../../../services/class.service';
+import { SettingsService } from '../../../services/settings.service';
+import { environment } from '../../../../environments/environment';
+
+@Component({
+  selector: 'app-student-id-cards',
+  templateUrl: './student-id-cards.component.html',
+  styleUrls: ['./student-id-cards.component.css']
+})
+export class StudentIdCardsComponent implements OnInit {
+  classes: any[] = [];
+  students: any[] = [];
+  selectedClassId: string = '';
+  selectedClassName: string = '';
+  loading = false;
+  error = '';
+  schoolName = '';
+  schoolLogo: string | null = null;
+  schoolAddress = '';
+  schoolPhone = '';
+  schoolEmail = '';
+  currentYear = '';
+
+  constructor(
+    private studentService: StudentService,
+    private classService: ClassService,
+    private settingsService: SettingsService
+  ) { }
+
+  ngOnInit() {
+    this.loadSettings();
+    this.loadClasses();
+  }
+
+  loadSettings() {
+    this.settingsService.getSettings().subscribe({
+      next: (data: any) => {
+        this.schoolName = data.schoolName || 'School';
+        this.schoolLogo = data.schoolLogo || null;
+        this.schoolAddress = data.schoolAddress || '';
+        this.schoolPhone = data.schoolPhone || '';
+        this.schoolEmail = data.schoolEmail || '';
+        if (data.academicYear) {
+          this.currentYear = data.academicYear;
+        } else {
+          this.currentYear = new Date().getFullYear().toString();
+        }
+      },
+      error: (err: any) => {
+        console.error('Error loading settings:', err);
+        this.schoolName = 'School';
+        this.currentYear = new Date().getFullYear().toString();
+      }
+    });
+  }
+
+  formatDate(date: Date | string | null | undefined): string {
+    if (!date) return '';
+    const d = new Date(date);
+    if (isNaN(d.getTime())) return '';
+    const day = String(d.getDate()).padStart(2, '0');
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const year = d.getFullYear();
+    return `${day}/${month}/${year}`;
+  }
+
+  getStudentContact(student: any): string {
+    return student.contactNumber || student.phoneNumber || '';
+  }
+
+  getStudentPhotoUrl(student: any): string | null {
+    if (!student || !student.photo) {
+      return null;
+    }
+    
+    try {
+      // Photo paths are like /uploads/students/filename.jpg
+      // The backend serves static files at /uploads/students (not under /api)
+      // Extract base URL from environment (e.g., http://localhost:3004 from http://localhost:3004/api)
+      let baseUrl = environment.apiUrl.replace('/api', '');
+      
+      // Ensure baseUrl doesn't end with a slash
+      if (baseUrl.endsWith('/')) {
+        baseUrl = baseUrl.slice(0, -1);
+      }
+      
+      // Ensure photo path starts with /
+      let photoPath = String(student.photo).trim();
+      if (!photoPath.startsWith('/')) {
+        photoPath = '/' + photoPath;
+      }
+      
+      // Construct full URL
+      const photoUrl = baseUrl + photoPath;
+      
+      // Validate URL format
+      try {
+        new URL(photoUrl); // This will throw if URL is invalid
+        return photoUrl;
+      } catch (urlError) {
+        console.error('Invalid photo URL constructed:', photoUrl, 'Error:', urlError);
+        return null;
+      }
+    } catch (error) {
+      console.error('Error constructing photo URL:', error, 'Student photo:', student.photo);
+      return null;
+    }
+  }
+
+  shouldShowPlaceholder(student: any): boolean {
+    // Show placeholder if no photo URL or if photo failed to load
+    const hasPhotoUrl = !!(student as any)?.photoUrl;
+    const photoLoadError = (student as any)?.photoLoadError === true;
+    
+    // Show placeholder only if: no URL OR error occurred
+    // Don't wait for photo to load - let the image show when it loads
+    return !hasPhotoUrl || photoLoadError;
+  }
+
+  onPhotoError(event: any, student: any): void {
+    // Mark that photo failed to load
+    const img = event.target;
+    const failedUrl = img?.src;
+    
+    console.error('Photo failed to load:', {
+      student: student?.firstName + ' ' + student?.lastName,
+      photoPath: student?.photo,
+      attemptedUrl: failedUrl,
+      error: 'Image load failed'
+    });
+    
+    if (student) {
+      (student as any).photoLoadError = true;
+      (student as any).photoLoaded = false;
+    }
+    // Hide the image
+    if (img) {
+      img.style.display = 'none';
+    }
+  }
+
+  onPhotoLoad(event: any, student: any): void {
+    // Mark that photo loaded successfully
+    if (student) {
+      (student as any).photoLoaded = true;
+      (student as any).photoLoadError = false;
+    }
+    // Ensure the image is visible
+    const img = event.target;
+    if (img) {
+      img.style.display = 'block';
+    }
+  }
+
+  loadClasses() {
+    this.loading = true;
+    this.classService.getClasses().subscribe({
+      next: (data: any) => {
+        const classesList = Array.isArray(data) ? data : (data?.data || []);
+        this.classes = this.classService.sortClasses(classesList);
+        this.loading = false;
+      },
+      error: (err: any) => {
+        this.error = 'Failed to load classes';
+        this.loading = false;
+        console.error('Error loading classes:', err);
+      }
+    });
+  }
+
+  onClassChange() {
+    if (!this.selectedClassId) {
+      this.students = [];
+      this.selectedClassName = '';
+      return;
+    }
+
+    this.loading = true;
+    this.error = '';
+    
+    // Find the selected class name
+    const selectedClass = this.classes.find(c => c.id === this.selectedClassId);
+    this.selectedClassName = selectedClass ? (selectedClass.name || selectedClass.form || '') : '';
+
+    // Load students for the selected class
+    this.studentService.getStudents({ classId: this.selectedClassId }).subscribe({
+      next: (data: any) => {
+        // Filter only active students
+        this.students = Array.isArray(data) ? data.filter((s: any) => s.isActive) : [];
+        // Initialize photo load states and pre-compute photo URLs for each student
+        this.students.forEach((student: any) => {
+          student.photoLoaded = false;
+          student.photoLoadError = false;
+          // Pre-compute photo URL to avoid multiple calls in template
+          student.photoUrl = this.getStudentPhotoUrl(student);
+          // Debug: Log photo information for students with photos
+          if (student.photo) {
+            console.log(`Student ${student.firstName} ${student.lastName}:`, {
+              photoPath: student.photo,
+              constructedUrl: student.photoUrl
+            });
+          }
+        });
+        this.loading = false;
+      },
+      error: (err: any) => {
+        this.error = 'Failed to load students';
+        this.loading = false;
+        console.error('Error loading students:', err);
+      }
+    });
+  }
+
+  printIdCards() {
+    window.print();
+  }
+
+  downloadPDF() {
+    // TODO: Implement PDF download functionality
+    alert('PDF download functionality will be implemented soon');
+  }
+}
+

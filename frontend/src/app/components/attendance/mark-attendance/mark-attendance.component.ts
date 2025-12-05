@@ -55,7 +55,9 @@ export class MarkAttendanceComponent implements OnInit {
   loadClasses() {
     this.classService.getClasses().subscribe({
       next: (data: any) => {
-        this.classes = data.filter((c: any) => c.isActive);
+        const classesList = Array.isArray(data) ? data : (data?.data || []);
+        const activeClasses = classesList.filter((c: any) => c.isActive);
+        this.classes = this.classService.sortClasses(activeClasses);
       },
       error: (err: any) => {
         this.error = 'Failed to load classes';

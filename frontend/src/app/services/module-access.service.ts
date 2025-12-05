@@ -173,6 +173,9 @@ export class ModuleAccessService {
     // Superadmin has access to everything
     if (role === 'superadmin') return true;
 
+    // Students don't use module access - they have direct access to their own data
+    if (role === 'student') return true;
+
     // Map role names to module access keys (handle singular/plural differences)
     const roleMap: { [key: string]: string } = {
       'teacher': 'teachers',
@@ -180,7 +183,8 @@ export class ModuleAccessService {
       'accountant': 'accountant',
       'admin': 'admin',
       'superadmin': 'superadmin',
-      'demo_user': 'demo_user'
+      'demo_user': 'demo_user',
+      'student': 'students'
     };
 
     const accessKey = roleMap[role] || role;

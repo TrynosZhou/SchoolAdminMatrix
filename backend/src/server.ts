@@ -17,6 +17,8 @@ console.log('[Server] ✓ Database configuration imported');
 import routes from './routes';
 console.log('[Server] ✓ Routes loaded');
 
+import * as path from 'path';
+
 // =================== ENVIRONMENT SETUP ===================
 dotenv.config();
 
@@ -84,7 +86,10 @@ app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
 // Serve uploaded student photos
-app.use('/uploads/students', express.static('uploads/students'));
+// Use absolute path to ensure it works regardless of where the server is started from
+const uploadsPath = path.join(__dirname, '../../uploads/students');
+console.log('[Server] Serving static files from:', uploadsPath);
+app.use('/uploads/students', express.static(uploadsPath));
 
 // =================== ROUTES ===================
 app.use('/api', routes);

@@ -57,6 +57,10 @@ export class AppComponent implements OnInit {
     return this.authService.hasRole('admin') || this.authService.hasRole('superadmin');
   }
 
+  isStudent(): boolean {
+    return this.authService.hasRole('student');
+  }
+
   isDemoUser(): boolean {
     const user = this.authService.getCurrentUser();
     return user?.isDemo === true || user?.email === 'demo@school.com' || user?.username === 'demo@school.com';

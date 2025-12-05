@@ -34,5 +34,19 @@ export class ClassService {
   deleteClass(id: string): Observable<any> {
     return this.http.delete(`${this.apiUrl}/classes/${id}`);
   }
+
+  /**
+   * Sort classes in ascending order by name
+   * @param classes Array of class objects
+   * @returns Sorted array of classes
+   */
+  sortClasses(classes: any[]): any[] {
+    if (!Array.isArray(classes)) return [];
+    return [...classes].sort((a, b) => {
+      const nameA = (a.name || '').toLowerCase().trim();
+      const nameB = (b.name || '').toLowerCase().trim();
+      return nameA.localeCompare(nameB);
+    });
+  }
 }
 

@@ -35,6 +35,9 @@ export class Marks {
   @Column('decimal', { precision: 5, scale: 2 })
   maxScore: number;
 
+  @Column('decimal', { precision: 5, scale: 2, nullable: true })
+  uniformMark: number | null; // Moderated uniform mark percentage
+
   @Column({ nullable: true, type: 'text' })
   comments: string;
 

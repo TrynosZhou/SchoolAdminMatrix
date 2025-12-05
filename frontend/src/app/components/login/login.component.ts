@@ -9,11 +9,15 @@ import { AuthService } from '../../services/auth.service';
 })
 export class LoginComponent implements OnInit {
   // Tab management
-  activeTab: 'signin' | 'signup' | 'reset' = 'signin';
+  activeTab: 'signin' | 'signup' | 'reset' | 'student' = 'signin';
   
   // Sign In fields
   email = '';
   password = '';
+  
+  // Student Login fields
+  studentId = '';
+  dateOfBirth = '';
   
   // Sign Up fields
   signupRole = '';
@@ -59,13 +63,15 @@ export class LoginComponent implements OnInit {
     this.showSignupConfirmPassword = !this.showSignupConfirmPassword;
   }
 
-  setTab(tab: 'signin' | 'signup' | 'reset') {
+  setTab(tab: 'signin' | 'signup' | 'reset' | 'student') {
     this.activeTab = tab;
     this.error = '';
     this.success = '';
     // Clear all fields when switching tabs
     this.email = '';
     this.password = '';
+    this.studentId = '';
+    this.dateOfBirth = '';
     this.signupRole = '';
     this.signupUsername = '';
     this.signupPassword = '';
@@ -111,8 +117,15 @@ export class LoginComponent implements OnInit {
         }
         
         // Navigate immediately - token and user are already stored
+        // Check if student login - redirect to student dashboard
+        if (user.role === 'student') {
+          this.router.navigate(['/student/dashboard']).catch(err => {
+            console.error('Navigation error:', err);
+            this.error = 'Failed to navigate. Please try again.';
+          });
+        }
         // Check if teacher must change password
-        if (user.role === 'teacher' && user.mustChangePassword) {
+        else if (user.role === 'teacher' && user.mustChangePassword) {
           // Navigate to manage account page
           this.router.navigate(['/teacher/manage-account']).catch(err => {
             console.error('Navigation error:', err);
@@ -154,6 +167,13 @@ export class LoginComponent implements OnInit {
                 this.error = 'Failed to navigate. Please try again.';
               });
             }
+          });
+        }
+        // Check if student login - redirect to student dashboard
+        else if (user.role === 'student') {
+          this.router.navigate(['/student/dashboard']).catch(err => {
+            console.error('Navigation error:', err);
+            this.error = 'Failed to navigate. Please try again.';
           });
         } else {
           // Navigate to regular dashboard for other roles
@@ -294,6 +314,83 @@ export class LoginComponent implements OnInit {
       },
       error: (err: any) => {
         this.error = err.error?.message || 'Failed to send reset email';
+        this.loading = false;
+      }
+    });
+  }
+
+  onStudentLogin(event?: Event) {
+    if (event) {
+      event.preventDefault();
+      event.stopPropagation();
+    }
+    
+    if (!this.studentId || !this.dateOfBirth) {
+      this.error = 'Please enter Student ID and Date of Birth';
+      return;
+    }
+
+    console.log('[Student Login] Attempting login with:', { 
+      studentId: this.studentId.trim(), 
+      dateOfBirth: this.dateOfBirth,
+      activeTab: this.activeTab 
+    });
+
+    this.loading = true;
+    this.error = '';
+    this.authService.studentLogin(this.studentId.trim(), this.dateOfBirth).subscribe({
+      next: (response: any) => {
+        this.loading = false;
+        
+        if (!response || !response.user) {
+          this.error = 'Invalid response from server';
+          return;
+        }
+        
+        const user = response.user;
+        
+        // Ensure token is stored before navigation
+        if (!response.token) {
+          this.error = 'Authentication token not received';
+          return;
+        }
+        
+        // Verify authentication is complete before navigation
+        if (!this.authService.isAuthenticated()) {
+          console.error('Authentication not complete after login');
+          this.error = 'Authentication failed. Please try again.';
+          return;
+        }
+        
+        // Navigate to student dashboard
+        if (user.role === 'student') {
+          this.router.navigate(['/student/dashboard']).catch(err => {
+            console.error('Navigation error:', err);
+            this.error = 'Failed to navigate. Please try again.';
+          });
+        } else {
+          this.error = 'Invalid user role';
+        }
+      },
+      error: (err: any) => {
+        console.error('Student login error:', err);
+        console.error('Error status:', err.status);
+        console.error('Error message:', err.error?.message || err.message);
+        
+        if (err.status === 0) {
+          // Connection error - server not reachable
+          this.error = 'Cannot connect to server. Please ensure the backend server is running.';
+        } else if (err.status === 401) {
+          // Unauthorized - invalid credentials
+          this.error = err.error?.message || 'Invalid Student ID or Date of Birth. Please try again.';
+        } else if (err.status === 500) {
+          // Server error
+          this.error = 'Server error. Please try again later.';
+        } else {
+          // Other errors
+          this.error = err.error?.message || err.message || 'Login failed. Please check your credentials.';
+        }
+        
         this.loading = false;
       }
     });

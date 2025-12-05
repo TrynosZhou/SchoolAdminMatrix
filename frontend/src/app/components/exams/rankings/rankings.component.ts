@@ -25,9 +25,7 @@ export class RankingsComponent implements OnInit {
   
   examTypes = [
     { value: 'mid_term', label: 'Mid Term' },
-    { value: 'end_term', label: 'End Term' },
-    { value: 'assignment', label: 'Assignment' },
-    { value: 'quiz', label: 'Quiz' }
+    { value: 'end_term', label: 'End Term' }
   ];
 
   constructor(
@@ -52,10 +50,11 @@ export class RankingsComponent implements OnInit {
   loadClasses() {
     this.classService.getClasses().subscribe({
       next: (data: any) => {
-        this.classes = data;
+        const classesList = Array.isArray(data) ? data : (data?.data || []);
+        this.classes = this.classService.sortClasses(classesList);
         // Extract unique grades/forms from classes
         const gradesSet = new Set<string>();
-        data.forEach((cls: any) => {
+        this.classes.forEach((cls: any) => {
           if (cls.form) {
             gradesSet.add(cls.form);
           }

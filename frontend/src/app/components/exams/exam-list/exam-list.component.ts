@@ -60,6 +60,10 @@ export class ExamListComponent implements OnInit, OnDestroy {
   autoSaveTimeout: any = null;
   isAutoSaving = false;
   pendingSaves: Set<string> = new Set();
+  savingStatus: Map<string, 'saving' | 'saved' | 'error' | null> = new Map(); // Track saving status per student
+  
+  // AI remark generation state
+  generatingRemarks: Map<string, boolean> = new Map(); // Track AI remark generation per student
   
   // Form validation
   fieldErrors: any = {};
@@ -75,13 +79,8 @@ export class ExamListComponent implements OnInit, OnDestroy {
   // Admin and publish status
   isAdmin = false;
   isPublished = false;
-  publishing = false;
   canPublish = false;
   checkingCompleteness = false;
-  
-  // Publish section (separate from marks entry)
-  publishExamType = '';
-  publishTerm = '';
 
   constructor(
     private examService: ExamService,
@@ -111,20 +110,6 @@ export class ExamListComponent implements OnInit, OnDestroy {
     }
     
     this.loadActiveTerm();
-    
-    // Set publish term from active term
-    this.settingsService.getActiveTerm().subscribe({
-      next: (data: any) => {
-        if (data.activeTerm) {
-          this.publishTerm = data.activeTerm;
-        } else if (data.currentTerm) {
-          this.publishTerm = data.currentTerm;
-        }
-      },
-      error: (err: any) => {
-        console.error('Error loading active term for publish:', err);
-      }
-    });
     
     // Save pending marks when page is about to unload
     window.addEventListener('beforeunload', this.handleBeforeUnload.bind(this));
@@ -200,7 +185,8 @@ export class ExamListComponent implements OnInit, OnDestroy {
   loadTeacherClasses(teacherId: string) {
     this.teacherService.getTeacherClasses(teacherId).subscribe({
       next: (response: any) => {
-        this.classes = response.classes || [];
+        const classesList = response.classes || [];
+        this.classes = this.classService.sortClasses(classesList);
         console.log('Loaded teacher classes:', this.classes.length);
       },
       error: (err: any) => {
@@ -214,7 +200,10 @@ export class ExamListComponent implements OnInit, OnDestroy {
   loadClasses() {
     // For admin/superadmin - load all classes
     this.classService.getClasses().subscribe({
-      next: (data: any) => this.classes = data,
+      next: (data: any) => {
+        const classesList = Array.isArray(data) ? data : (data?.data || []);
+        this.classes = this.classService.sortClasses(classesList);
+      },
       error: (err: any) => {
         console.error('Error loading classes:', err);
         this.classes = [];
@@ -483,7 +472,23 @@ export class ExamListComponent implements OnInit, OnDestroy {
           if (this.marks[key]) {
             this.marks[key].score = mark.score;
             this.marks[key].maxScore = mark.maxScore;
-            this.marks[key].comments = mark.comments || '';
+            
+            // Don't overwrite AI-generated remarks that haven't been saved yet
+            // Only update comments if:
+            // 1. There's no existing comments, OR
+            // 2. The existing comments are not AI-generated, OR
+            // 3. The backend has comments (meaning they were saved)
+            const existingMark = this.marks[key];
+            const hasAIGenerated = (existingMark as any)?.aiGenerated === true;
+            const hasExistingComments = existingMark.comments && existingMark.comments.trim() !== '';
+            
+            if (!hasAIGenerated || !hasExistingComments || (mark.comments && mark.comments.trim() !== '')) {
+              this.marks[key].comments = mark.comments || '';
+              // Clear AI-generated flag if we're loading from backend (means it was saved)
+              if (mark.comments && mark.comments.trim() !== '') {
+                (this.marks[key] as any).aiGenerated = false;
+              }
+            }
           }
         });
       },
@@ -655,14 +660,31 @@ export class ExamListComponent implements OnInit, OnDestroy {
   }
 
   onMarkChange(studentId: string) {
+    // Mark as pending save
+    this.savingStatus.set(studentId, 'saving');
     // Round to integer when user types
     const key = this.getMarkKey(studentId, this.selectedSubjectId);
     const mark = this.marks[key];
     if (mark && mark.score !== null && mark.score !== undefined && mark.score !== '') {
       const score = parseFloat(mark.score);
-      if (!isNaN(score)) {
+      if (!isNaN(score) && score >= 0 && score <= 100) {
         const roundedScore = Math.round(score);
         mark.score = roundedScore;
+        
+        // Auto-generate AI remark if comments field is empty
+        // Use a small delay to avoid generating while user is still typing
+        const existingTimeout = (mark as any).aiRemarkTimeout;
+        if (existingTimeout) {
+          clearTimeout(existingTimeout);
+        }
+        
+        if (!mark.comments || mark.comments.trim() === '') {
+          // Wait 1 second after user stops typing before generating remark
+          (mark as any).aiRemarkTimeout = setTimeout(() => {
+            this.generateAIRemark(studentId, roundedScore);
+            (mark as any).aiRemarkTimeout = null;
+          }, 1000);
+        }
       }
     }
     // Schedule auto-save for this student
@@ -670,6 +692,8 @@ export class ExamListComponent implements OnInit, OnDestroy {
   }
 
   onCommentsChange(studentId: string) {
+    // Mark as pending save
+    this.savingStatus.set(studentId, 'saving');
     // Schedule auto-save when comments change
     this.scheduleAutoSave(studentId);
   }
@@ -716,47 +740,79 @@ export class ExamListComponent implements OnInit, OnDestroy {
   }
 
   autoSaveStudent(studentId: string) {
-    if (!this.currentExam || !this.currentExam.id || this.isAutoSaving) {
+    if (!this.currentExam || !this.currentExam.id) {
       return;
     }
 
     const key = this.getMarkKey(studentId, this.selectedSubjectId);
     const mark = this.marks[key];
     
-    // Only save if there's data to save
-    if (!mark || (mark.score === null && !mark.comments)) {
+    // Only save if there's data to save (score or comments)
+    if (!mark || (mark.score === null && (!mark.comments || mark.comments.trim() === ''))) {
+      this.savingStatus.set(studentId, null);
       return;
     }
+
+    // Mark as saving
+    this.savingStatus.set(studentId, 'saving');
 
     const marksData = [{
       studentId: studentId,
       subjectId: this.selectedSubjectId,
-      score: mark.score ? Math.round(parseFloat(mark.score)) : null,
+      score: mark.score !== null && mark.score !== undefined ? Math.round(parseFloat(String(mark.score))) : null,
       maxScore: 100,
       comments: mark.comments || ''
     }];
+    
+    console.log('Auto-saving mark with AI-generated comment:', {
+      studentId,
+      score: marksData[0].score,
+      comments: marksData[0].comments,
+      hasComments: !!(mark.comments && mark.comments.trim() !== '')
+    });
 
-    this.isAutoSaving = true;
     this.examService.captureMarks(this.currentExam.id, marksData).subscribe({
       next: (data: any) => {
-        this.isAutoSaving = false;
-        // Show brief success message
-        const student = this.students.find(s => s.id === studentId);
-        const studentName = student ? `${student.firstName} ${student.lastName}` : 'Student';
-        this.showAutoSaveSuccess(`✓ ${studentName}'s marks saved automatically`);
+        console.log('Mark saved successfully:', {
+          studentId,
+          savedCount: data.savedCount,
+          comments: marksData[0].comments
+        });
+        // Clear AI-generated flag after successful save
+        if ((mark as any).aiGenerated) {
+          (mark as any).aiGenerated = false;
+          console.log('AI-generated flag cleared after successful save');
+        }
+        // Mark as saved
+        this.savingStatus.set(studentId, 'saved');
+        // Clear saved status after 2 seconds
+        setTimeout(() => {
+          if (this.savingStatus.get(studentId) === 'saved') {
+            this.savingStatus.set(studentId, null);
+          }
+        }, 2000);
       },
       error: (err: any) => {
-        this.isAutoSaving = false;
-        // Don't show error for auto-save failures, just log them
+        // Mark as error
+        this.savingStatus.set(studentId, 'error');
         console.error('Auto-save failed:', err);
+        // Clear error status after 3 seconds
+        setTimeout(() => {
+          if (this.savingStatus.get(studentId) === 'error') {
+            this.savingStatus.set(studentId, null);
+          }
+        }, 3000);
       }
     });
   }
 
   autoSaveStudents(studentIds: string[]) {
-    if (!this.currentExam || !this.currentExam.id || this.isAutoSaving || studentIds.length === 0) {
+    if (!this.currentExam || !this.currentExam.id || studentIds.length === 0) {
       return;
     }
+
+    // Mark all students as saving
+    studentIds.forEach(id => this.savingStatus.set(id, 'saving'));
 
     const marksData = studentIds.map(studentId => {
       const key = this.getMarkKey(studentId, this.selectedSubjectId);
@@ -775,18 +831,205 @@ export class ExamListComponent implements OnInit, OnDestroy {
     }).filter((m: any) => m !== null);
 
     if (marksData.length === 0) {
+      studentIds.forEach(id => this.savingStatus.set(id, null));
       return;
     }
 
-    this.isAutoSaving = true;
     this.examService.captureMarks(this.currentExam.id, marksData).subscribe({
       next: (data: any) => {
-        this.isAutoSaving = false;
-        this.showAutoSaveSuccess(`✓ Auto-saved marks for ${marksData.length} student(s)`);
+        // Mark all as saved
+        studentIds.forEach(id => {
+          this.savingStatus.set(id, 'saved');
+          // Clear saved status after 2 seconds
+          setTimeout(() => {
+            if (this.savingStatus.get(id) === 'saved') {
+              this.savingStatus.set(id, null);
+            }
+          }, 2000);
+        });
       },
       error: (err: any) => {
-        this.isAutoSaving = false;
+        // Mark all as error
+        studentIds.forEach(id => {
+          this.savingStatus.set(id, 'error');
+          // Clear error status after 3 seconds
+          setTimeout(() => {
+            if (this.savingStatus.get(id) === 'error') {
+              this.savingStatus.set(id, null);
+            }
+          }, 3000);
+        });
         console.error('Auto-save failed:', err);
+      }
+    });
+  }
+
+  getSavingStatus(studentId: string): 'saving' | 'saved' | 'error' | null {
+    return this.savingStatus.get(studentId) || null;
+  }
+
+  isGeneratingRemark(studentId: string): boolean {
+    return this.generatingRemarks.get(studentId) || false;
+  }
+
+  generateAIRemark(studentId: string, score: number) {
+    if (!this.selectedSubjectId || !this.currentExam || this.isPublished) {
+      console.log('AI Remark generation skipped:', { 
+        selectedSubjectId: this.selectedSubjectId, 
+        currentExam: !!this.currentExam, 
+        isPublished: this.isPublished 
+      });
+      return;
+    }
+
+    // Check if already generating for this student
+    if (this.generatingRemarks.get(studentId)) {
+      console.log('AI Remark already generating for student:', studentId);
+      return;
+    }
+
+    const key = this.getMarkKey(studentId, this.selectedSubjectId);
+    const mark = this.marks[key];
+    
+    // Check if comments field already has content
+    if (mark && mark.comments && mark.comments.trim() !== '') {
+      console.log('AI Remark skipped - comments already exist for student:', studentId);
+      return;
+    }
+
+    console.log('Generating AI remark for student:', studentId, 'score:', score, 'subject:', this.selectedSubjectId);
+
+    // Set generating state
+    this.generatingRemarks.set(studentId, true);
+
+    // Generate AI remark
+    this.examService.generateAIRemark(studentId, this.selectedSubjectId, score, 100).subscribe({
+      next: (response: any) => {
+        console.log('AI Remark generated successfully:', response);
+        const key = this.getMarkKey(studentId, this.selectedSubjectId);
+        const mark = this.marks[key];
+        
+        if (mark && response.remark) {
+          // Only set remark if comments field is still empty (user hasn't manually entered one)
+          if (!mark.comments || mark.comments.trim() === '') {
+            mark.comments = response.remark;
+            console.log('AI Remark set in comments field:', response.remark);
+            
+            // Mark this as an AI-generated remark to prevent loadExistingMarks from overwriting it
+            (mark as any).aiGenerated = true;
+            (mark as any).aiGeneratedAt = new Date().getTime();
+            
+            // Immediately save the generated remark (don't wait for auto-save)
+            this.autoSaveStudent(studentId);
+          } else {
+            console.log('AI Remark not set - comments field was filled while generating');
+          }
+        } else {
+          console.warn('AI Remark response missing or invalid:', response);
+        }
+        
+        this.generatingRemarks.set(studentId, false);
+      },
+      error: (err: any) => {
+        console.error('Error generating AI remark:', err);
+        console.error('Error details:', {
+          status: err.status,
+          statusText: err.statusText,
+          message: err.error?.message || err.message,
+          error: err.error,
+          errorString: JSON.stringify(err.error, null, 2)
+        });
+        
+        // Show detailed error message to user
+        let errorMessage = 'Failed to generate AI remark';
+        if (err.error) {
+          if (err.error.message) {
+            errorMessage = err.error.message;
+          } else if (typeof err.error === 'string') {
+            errorMessage = err.error;
+          } else {
+            errorMessage = JSON.stringify(err.error);
+          }
+        } else if (err.message) {
+          errorMessage = err.message;
+        }
+        
+        // Show error message to user
+        if (err.status === 500) {
+          if (errorMessage.includes('OpenAI API key')) {
+            this.error = 'AI remark generation is not configured. Please contact the administrator to set up OpenAI API key.';
+          } else {
+            this.error = `AI remark generation failed: ${errorMessage}`;
+          }
+          setTimeout(() => this.error = '', 8000);
+        } else if (err.status !== 0) {
+          // Only show error if it's not a network error (status 0 usually means server is down)
+          this.error = `Failed to generate AI remark: ${errorMessage}`;
+          setTimeout(() => this.error = '', 5000);
+        }
+        
+        this.generatingRemarks.set(studentId, false);
+      }
+    });
+  }
+
+  cancelMarkAndRemark(studentId: string) {
+    if (this.isPublished || !this.currentExam || !this.currentExam.id) {
+      return;
+    }
+
+    const key = this.getMarkKey(studentId, this.selectedSubjectId);
+    const mark = this.marks[key];
+
+    // Only proceed if there's something to cancel
+    if (!mark || (mark.score === null && (!mark.comments || mark.comments.trim() === ''))) {
+      return;
+    }
+
+    // Clear local data immediately
+    if (mark) {
+      mark.score = null;
+      mark.comments = '';
+    }
+
+    // Clear from backend
+    const marksData = [{
+      studentId: studentId,
+      subjectId: this.selectedSubjectId,
+      score: null,
+      maxScore: 100,
+      comments: ''
+    }];
+
+    // Mark as saving
+    this.savingStatus.set(studentId, 'saving');
+
+    this.examService.captureMarks(this.currentExam.id, marksData).subscribe({
+      next: (data: any) => {
+        // Mark as saved
+        this.savingStatus.set(studentId, 'saved');
+        // Clear saved status after 2 seconds
+        setTimeout(() => {
+          if (this.savingStatus.get(studentId) === 'saved') {
+            this.savingStatus.set(studentId, null);
+          }
+        }, 2000);
+      },
+      error: (err: any) => {
+        // Revert local changes on error
+        if (mark) {
+          // Restore from backend if available
+          this.loadExistingMarks();
+        }
+        this.savingStatus.set(studentId, 'error');
+        this.error = err.error?.message || 'Failed to cancel mark and remark';
+        setTimeout(() => {
+          this.error = '';
+          if (this.savingStatus.get(studentId) === 'error') {
+            this.savingStatus.set(studentId, null);
+          }
+        }, 3000);
+        console.error('Cancel failed:', err);
       }
     });
   }
@@ -1010,40 +1253,5 @@ export class ExamListComponent implements OnInit, OnDestroy {
     });
   }
 
-  publishResults() {
-    // For publishing, only exam type and term are required
-    if (!this.publishExamType) {
-      this.error = 'Please select an exam type to publish results.';
-      return;
-    }
-
-    if (!this.publishTerm) {
-      this.error = 'Term is required. Please ensure the active term is set in settings.';
-      return;
-    }
-
-    if (!confirm(`Are you sure you want to publish all ${this.examTypes.find(t => t.value === this.publishExamType)?.label || this.publishExamType} results for ${this.publishTerm}? Once published, results will be visible to all users (students, parents, and teachers) and marks/comments cannot be edited.`)) {
-      return;
-    }
-
-    this.publishing = true;
-    this.error = '';
-    this.success = '';
-
-    // Publish by exam type and term (all classes)
-    this.examService.publishExamByType(this.publishExamType, this.publishTerm).subscribe({
-      next: (response: any) => {
-        this.success = `Results published successfully! ${response.publishedCount || 0} exam(s) published. All users (students, parents, and teachers) can now view the results.`;
-        this.publishing = false;
-        setTimeout(() => this.success = '', 8000);
-      },
-      error: (err: any) => {
-        console.error('Error publishing exam:', err);
-        this.error = err.error?.message || 'Failed to publish results. Please try again.';
-        this.publishing = false;
-        setTimeout(() => this.error = '', 5000);
-      }
-    });
-  }
 }
 

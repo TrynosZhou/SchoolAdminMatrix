@@ -145,7 +145,8 @@ export class ReportCardComponent implements OnInit {
   loadTeacherClasses(teacherId: string) {
     this.teacherService.getTeacherClasses(teacherId).subscribe({
       next: (response: any) => {
-        this.classes = response.classes || [];
+        const classesList = response.classes || [];
+        this.classes = this.classService.sortClasses(classesList);
         console.log('Loaded teacher classes:', this.classes.length);
       },
       error: (err: any) => {

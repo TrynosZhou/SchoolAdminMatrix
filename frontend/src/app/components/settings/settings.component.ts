@@ -539,9 +539,8 @@ export class SettingsComponent implements OnInit {
   loadClasses() {
     this.classService.getClasses().subscribe({
       next: (response: any) => {
-        this.classes = Array.isArray(response) ? response : (response?.classes || []);
-        // Sort by name
-        this.classes.sort((a, b) => a.name.localeCompare(b.name));
+        const classesList = Array.isArray(response) ? response : (response?.classes || []);
+        this.classes = this.classService.sortClasses(classesList);
       },
       error: (err: any) => {
         console.error('Error loading classes:', err);

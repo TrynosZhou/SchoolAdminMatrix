@@ -214,9 +214,13 @@ export const getPublicSplashSettings = async (_req: Request, res: Response) => {
     }
 
     const settingsRepository = AppDataSource.getRepository(Settings);
-    const settings = await settingsRepository.findOne({
-      order: { createdAt: 'DESC' }
+    
+    // Use find with take: 1 instead of findOne for better compatibility
+    const settingsList = await settingsRepository.find({
+      order: { createdAt: 'DESC' },
+      take: 1
     });
+    const settings = settingsList.length > 0 ? settingsList[0] : null;
 
     if (!settings) {
       return res.json({
@@ -229,8 +233,8 @@ export const getPublicSplashSettings = async (_req: Request, res: Response) => {
 
     res.json({
       schoolName: settings.schoolName || 'School Management System',
-      schoolLogo: settings.schoolLogo || null,
-      schoolLogo2: settings.schoolLogo2 || null,
+      schoolLogo: settings.schoolLogo !== null && settings.schoolLogo !== undefined ? settings.schoolLogo : null,
+      schoolLogo2: settings.schoolLogo2 !== null && settings.schoolLogo2 !== undefined ? settings.schoolLogo2 : null,
       schoolMotto: settings.schoolMotto || null
     });
   } catch (error: any) {

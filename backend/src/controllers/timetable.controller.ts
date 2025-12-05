@@ -1,0 +1,1027 @@
+import { Response } from 'express';
+import { AppDataSource } from '../config/database';
+import { TimetableConfig } from '../entities/TimetableConfig';
+import { TimetableSlot } from '../entities/TimetableSlot';
+import { TimetableVersion } from '../entities/TimetableVersion';
+import { Teacher } from '../entities/Teacher';
+import { Class } from '../entities/Class';
+import { Subject } from '../entities/Subject';
+import { Settings } from '../entities/Settings';
+import { AuthRequest } from '../middleware/auth';
+import { In, Not } from 'typeorm';
+import { createTimetablePDF } from '../utils/timetablePdfGenerator';
+
+// Get or create active timetable configuration
+export const getTimetableConfig = async (req: AuthRequest, res: Response) => {
+  try {
+    if (!AppDataSource.isInitialized) {
+      await AppDataSource.initialize();
+    }
+
+    const configRepository = AppDataSource.getRepository(TimetableConfig);
+    let config = await configRepository.findOne({ where: { isActive: true } });
+
+    if (!config) {
+      // Create default configuration
+      config = configRepository.create({
+        periodsPerDay: 8,
+        schoolStartTime: '08:00',
+        schoolEndTime: '16:00',
+        periodDurationMinutes: 40,
+        breakPeriods: [
+          { name: 'Tea Break', startTime: '10:30', endTime: '11:00', durationMinutes: 30 },
+          { name: 'Lunch', startTime: '13:00', endTime: '14:00', durationMinutes: 60 }
+        ],
+        daysOfWeek: ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'],
+        isActive: true
+      });
+      await configRepository.save(config);
+    }
+
+    res.json(config);
+  } catch (error: any) {
+    console.error('[getTimetableConfig] Error:', error);
+    res.status(500).json({ message: 'Failed to fetch timetable configuration', error: error.message });
+  }
+};
+
+// Save or update timetable configuration
+export const saveTimetableConfig = async (req: AuthRequest, res: Response) => {
+  try {
+    if (!AppDataSource.isInitialized) {
+      await AppDataSource.initialize();
+    }
+
+    const configRepository = AppDataSource.getRepository(TimetableConfig);
+    const existingConfig = await configRepository.findOne({ where: { isActive: true } });
+
+    const configData = {
+      periodsPerDay: req.body.periodsPerDay || 8,
+      schoolStartTime: req.body.schoolStartTime || '08:00',
+      schoolEndTime: req.body.schoolEndTime || '16:00',
+      periodDurationMinutes: req.body.periodDurationMinutes || 40,
+      breakPeriods: req.body.breakPeriods || [],
+      lessonsPerWeek: req.body.lessonsPerWeek || {},
+      daysOfWeek: req.body.daysOfWeek || ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'],
+      additionalPreferences: req.body.additionalPreferences || {},
+      isActive: true
+    };
+
+    if (existingConfig) {
+      Object.assign(existingConfig, configData);
+      await configRepository.save(existingConfig);
+      res.json({ message: 'Timetable configuration updated successfully', config: existingConfig });
+    } else {
+      const newConfig = configRepository.create(configData);
+      await configRepository.save(newConfig);
+      res.json({ message: 'Timetable configuration created successfully', config: newConfig });
+    }
+  } catch (error: any) {
+    console.error('[saveTimetableConfig] Error:', error);
+    res.status(500).json({ message: 'Failed to save timetable configuration', error: error.message });
+  }
+};
+
+// Generate timetable
+export const generateTimetable = async (req: AuthRequest, res: Response) => {
+  try {
+    if (!AppDataSource.isInitialized) {
+      await AppDataSource.initialize();
+    }
+
+    const { versionName, description } = req.body;
+
+    console.log('[generateTimetable] Starting timetable generation...');
+
+    // Get active configuration
+    const configRepository = AppDataSource.getRepository(TimetableConfig);
+    const config = await configRepository.findOne({ where: { isActive: true } });
+
+    if (!config) {
+      console.error('[generateTimetable] No active configuration found');
+      return res.status(400).json({ message: 'No active timetable configuration found. Please configure the timetable first.' });
+    }
+
+    console.log('[generateTimetable] Found active configuration:', config.id);
+
+    // Get all active teachers, classes, and subjects
+    const teacherRepository = AppDataSource.getRepository(Teacher);
+    const classRepository = AppDataSource.getRepository(Class);
+    const subjectRepository = AppDataSource.getRepository(Subject);
+
+    // Load teachers with their class and subject assignments
+    const teachers = await teacherRepository.find({
+      where: { isActive: true },
+      relations: ['classes', 'subjects']
+    });
+
+    // Load classes with their subjects and teachers
+    const classes = await classRepository.find({
+      where: { isActive: true },
+      relations: ['subjects', 'teachers']
+    });
+
+    const subjects = await subjectRepository.find({
+      where: { isActive: true }
+    });
+
+    if (teachers.length === 0 || classes.length === 0 || subjects.length === 0) {
+      return res.status(400).json({ message: 'Insufficient data to generate timetable. Please ensure there are active teachers, classes, and subjects.' });
+    }
+
+    console.log(`[generateTimetable] Found ${teachers.length} teachers, ${classes.length} classes, ${subjects.length} subjects`);
+    
+    // Try to query TeacherClass junction table for logging (optional - table might not exist)
+    try {
+      const { TeacherClass } = await import('../entities/TeacherClass');
+      const teacherClassRepository = AppDataSource.getRepository(TeacherClass);
+      const teacherClassAssignments = await teacherClassRepository.find({
+        relations: ['teacher', 'class']
+      });
+      console.log(`[generateTimetable] Found ${teacherClassAssignments.length} teacher-class assignments in junction table`);
+      
+      // Log assignment summary
+      const assignmentSummary = teacherClassAssignments.map(tc => ({
+        teacher: `${tc.teacher?.firstName} ${tc.teacher?.lastName}`,
+        class: tc.class?.name
+      }));
+      console.log(`[generateTimetable] Assignment summary:`, assignmentSummary);
+    } catch (junctionError: any) {
+      // Junction table might not exist - that's okay, we'll use ManyToMany relationships instead
+      console.log(`[generateTimetable] Junction table not available, using ManyToMany relationships: ${junctionError.message}`);
+      
+      // Log assignment summary from ManyToMany relationships
+      const assignmentSummary: any[] = [];
+      teachers.forEach(teacher => {
+        teacher.classes?.forEach(classEntity => {
+          assignmentSummary.push({
+            teacher: `${teacher.firstName} ${teacher.lastName}`,
+            class: classEntity.name
+          });
+        });
+      });
+      console.log(`[generateTimetable] Assignment summary (from ManyToMany):`, assignmentSummary);
+    }
+
+    // Create new timetable version
+    console.log('[generateTimetable] Creating timetable version...');
+    const versionRepository = AppDataSource.getRepository(TimetableVersion);
+    
+    try {
+      // Create version - try with configId first, fallback without it if column doesn't exist
+      let version: TimetableVersion;
+      try {
+        version = versionRepository.create({
+          name: versionName || `Timetable ${new Date().toLocaleDateString()}`,
+          description: description || null,
+          configId: config.id,
+          isActive: false,
+          isPublished: false,
+          createdBy: req.user?.id || null
+        });
+        await versionRepository.save(version);
+      } catch (configIdError: any) {
+        // If error is about configId column not existing, try without it
+        if (configIdError.message?.includes('configId') || configIdError.code === '42703') {
+          console.warn('[generateTimetable] configId column may not exist, creating version without it');
+          version = versionRepository.create({
+            name: versionName || `Timetable ${new Date().toLocaleDateString()}`,
+            description: description || null,
+            isActive: false,
+            isPublished: false,
+            createdBy: req.user?.id || null
+          });
+          await versionRepository.save(version);
+        } else {
+          throw configIdError;
+        }
+      }
+      console.log('[generateTimetable] Created version:', version.id);
+      
+      // Generate timetable slots
+      console.log('[generateTimetable] Generating timetable slots...');
+      const slots = await generateTimetableSlots(config, teachers, classes, subjects, version.id);
+      console.log(`[generateTimetable] Generated ${slots.length} slots`);
+
+      // Save all slots
+      console.log('[generateTimetable] Saving slots to database...');
+      const slotRepository = AppDataSource.getRepository(TimetableSlot);
+      if (slots.length > 0) {
+        await slotRepository.save(slots);
+        console.log('[generateTimetable] Slots saved successfully');
+      } else {
+        console.warn('[generateTimetable] No slots to save');
+      }
+
+      // Fetch the complete version with slots
+      const completeVersion = await versionRepository.findOne({
+        where: { id: version.id },
+        relations: ['slots', 'slots.teacher', 'slots.class', 'slots.subject']
+      });
+
+      res.json({
+        message: 'Timetable generated successfully',
+        version: completeVersion,
+        stats: {
+          totalSlots: slots.length,
+          teachers: teachers.length,
+          classes: classes.length,
+          subjects: subjects.length
+        }
+      });
+    } catch (versionError: any) {
+      console.error('[generateTimetable] Error creating/saving version:', versionError);
+      console.error('[generateTimetable] Error details:', {
+        message: versionError.message,
+        code: versionError.code,
+        constraint: versionError.constraint,
+        table: versionError.table
+      });
+      throw versionError; // Re-throw to be caught by outer catch
+    }
+
+  } catch (error: any) {
+    console.error('[generateTimetable] Error:', error);
+    console.error('[generateTimetable] Error stack:', error.stack);
+    
+    // If it's the "no assignments" error, include diagnostics
+    if (error.diagnostics) {
+      return res.status(400).json({ 
+        message: error.message,
+        diagnostics: error.diagnostics,
+        help: [
+          '1. Go to Teachers > Edit Teacher > Select Classes (assign teachers to classes)',
+          '2. Go to Teachers > Edit Teacher > Select Subjects (assign subjects to teachers)',
+          '3. Go to Classes > Edit Class > Select Subjects (assign subjects to classes)',
+          '4. Ensure at least one teacher is assigned to a class AND teaches a subject that the class has'
+        ]
+      });
+    }
+    
+    res.status(500).json({ 
+      message: 'Failed to generate timetable', 
+      error: error.message,
+      details: process.env.NODE_ENV === 'development' ? error.stack : undefined
+    });
+  }
+};
+
+// Helper function to generate timetable slots
+async function generateTimetableSlots(
+  config: TimetableConfig,
+  teachers: Teacher[],
+  classes: Class[],
+  subjects: Subject[],
+  versionId: string
+): Promise<TimetableSlot[]> {
+  const slots: TimetableSlot[] = [];
+  const daysOfWeek = config.daysOfWeek || ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
+  
+  // Build teacher-class-subject assignments using existing database relationships
+  const assignments: Array<{
+    teacher: Teacher;
+    class: Class;
+    subject: Subject;
+    lessonsPerWeek: number;
+  }> = [];
+
+  console.log('[generateTimetableSlots] Building teacher-class-subject assignments...');
+  console.log(`[generateTimetableSlots] Processing ${classes.length} classes, ${teachers.length} teachers`);
+
+  // Log what we have
+  teachers.forEach(teacher => {
+    const classCount = teacher.classes?.length || 0;
+    const subjectCount = teacher.subjects?.length || 0;
+    console.log(`[generateTimetableSlots] Teacher: ${teacher.firstName} ${teacher.lastName} - Classes: ${classCount}, Subjects: ${subjectCount}`);
+    if (classCount > 0) {
+      console.log(`  Classes: ${teacher.classes?.map(c => c.name).join(', ') || 'none'}`);
+    }
+    if (subjectCount > 0) {
+      console.log(`  Subjects: ${teacher.subjects?.map(s => s.name).join(', ') || 'none'}`);
+    }
+  });
+
+  classes.forEach(classEntity => {
+    const subjectCount = classEntity.subjects?.length || 0;
+    const teacherCount = classEntity.teachers?.length || 0;
+    console.log(`[generateTimetableSlots] Class: ${classEntity.name} - Subjects: ${subjectCount}, Teachers: ${teacherCount}`);
+    if (subjectCount > 0) {
+      console.log(`  Subjects: ${classEntity.subjects?.map(s => s.name).join(', ') || 'none'}`);
+    }
+  });
+
+  // For each class, find which teachers teach which subjects
+  for (const classEntity of classes) {
+    if (!classEntity.subjects || classEntity.subjects.length === 0) {
+      console.warn(`[generateTimetableSlots] Class ${classEntity.name} has no subjects assigned`);
+      continue;
+    }
+
+    for (const subject of classEntity.subjects) {
+      // Find teachers who:
+      // 1. Are assigned to this class (via ManyToMany or TeacherClass junction table)
+      // 2. Teach this subject (via ManyToMany subjects relation)
+      const eligibleTeachers = teachers.filter(teacher => {
+        if (!teacher.isActive) {
+          console.log(`[generateTimetableSlots] Teacher ${teacher.firstName} ${teacher.lastName} is not active`);
+          return false;
+        }
+        
+        // Check if teacher teaches this subject
+        const teachesSubject = teacher.subjects?.some(s => s.id === subject.id) || false;
+        if (!teachesSubject) {
+          console.log(`[generateTimetableSlots] Teacher ${teacher.firstName} ${teacher.lastName} does not teach ${subject.name}`);
+          return false;
+        }
+
+        // Check if teacher is assigned to this class
+        const assignedToClass = teacher.classes?.some(c => c.id === classEntity.id) || false;
+        if (!assignedToClass) {
+          console.log(`[generateTimetableSlots] Teacher ${teacher.firstName} ${teacher.lastName} is not assigned to ${classEntity.name}`);
+          return false;
+        }
+        
+        return true;
+      });
+
+      if (eligibleTeachers.length > 0) {
+        // Use first eligible teacher (can be enhanced to distribute evenly)
+        const teacher = eligibleTeachers[0];
+        const lessonsPerWeek = config.lessonsPerWeek?.[subject.id] || 3; // Default 3 lessons per week
+
+        assignments.push({
+          teacher,
+          class: classEntity,
+          subject,
+          lessonsPerWeek
+        });
+
+        console.log(`[generateTimetableSlots] ✓ Assignment: ${teacher.firstName} ${teacher.lastName} -> ${classEntity.name} -> ${subject.name} (${lessonsPerWeek} lessons/week)`);
+      } else {
+        console.warn(`[generateTimetableSlots] ✗ No eligible teacher found for ${classEntity.name} - ${subject.name}`);
+        console.warn(`  Requirements: Teacher must be assigned to ${classEntity.name} AND teach ${subject.name}`);
+      }
+    }
+  }
+
+  if (assignments.length === 0) {
+    // Build diagnostic information
+    const diagnostics: any = {
+      teachers: teachers.map(t => ({
+        name: `${t.firstName} ${t.lastName}`,
+        isActive: t.isActive,
+        classesCount: t.classes?.length || 0,
+        classes: t.classes?.map(c => c.name) || [],
+        subjectsCount: t.subjects?.length || 0,
+        subjects: t.subjects?.map(s => s.name) || []
+      })),
+      classes: classes.map(c => ({
+        name: c.name,
+        isActive: c.isActive,
+        subjectsCount: c.subjects?.length || 0,
+        subjects: c.subjects?.map(s => s.name) || [],
+        teachersCount: c.teachers?.length || 0,
+        teachers: c.teachers?.map(t => `${t.firstName} ${t.lastName}`) || []
+      })),
+      issues: [] as string[]
+    };
+
+    // Identify specific issues
+    const teachersWithoutClasses = teachers.filter(t => !t.classes || t.classes.length === 0);
+    const teachersWithoutSubjects = teachers.filter(t => !t.subjects || t.subjects.length === 0);
+    const classesWithoutSubjects = classes.filter(c => !c.subjects || c.subjects.length === 0);
+
+    if (teachersWithoutClasses.length > 0) {
+      diagnostics.issues.push(`${teachersWithoutClasses.length} teacher(s) have no classes assigned: ${teachersWithoutClasses.map(t => `${t.firstName} ${t.lastName}`).join(', ')}`);
+    }
+    if (teachersWithoutSubjects.length > 0) {
+      diagnostics.issues.push(`${teachersWithoutSubjects.length} teacher(s) have no subjects assigned: ${teachersWithoutSubjects.map(t => `${t.firstName} ${t.lastName}`).join(', ')}`);
+    }
+    if (classesWithoutSubjects.length > 0) {
+      diagnostics.issues.push(`${classesWithoutSubjects.length} class(es) have no subjects assigned: ${classesWithoutSubjects.map(c => c.name).join(', ')}`);
+    }
+
+    // Check for mismatches
+    const mismatches: string[] = [];
+    classes.forEach(classEntity => {
+      if (classEntity.subjects && classEntity.subjects.length > 0) {
+        classEntity.subjects.forEach(subject => {
+          const hasTeacher = teachers.some(teacher => 
+            teacher.isActive &&
+            teacher.subjects?.some(s => s.id === subject.id) &&
+            teacher.classes?.some(c => c.id === classEntity.id)
+          );
+          if (!hasTeacher) {
+            mismatches.push(`No teacher found for ${classEntity.name} - ${subject.name}`);
+          }
+        });
+      }
+    });
+    if (mismatches.length > 0) {
+      diagnostics.issues.push(...mismatches);
+    }
+
+    console.error('[generateTimetableSlots] No assignments found. Diagnostics:', JSON.stringify(diagnostics, null, 2));
+    
+    const error: any = new Error('No teacher-class-subject assignments found. Please configure teacher-class-subject relationships first.');
+    error.diagnostics = diagnostics;
+    throw error;
+  }
+
+  console.log(`[generateTimetableSlots] Total assignments: ${assignments.length}`);
+
+  // Create a conflict-free schedule
+  const teacherSchedule: Map<string, Set<string>> = new Map(); // teacherId -> Set of "day-period"
+  const classSchedule: Map<string, Set<string>> = new Map(); // classId -> Set of "day-period"
+  const teacherClassConsecutive: Map<string, number> = new Map(); // "teacherId-classId-day" -> consecutive count
+
+  // Initialize schedules
+  teachers.forEach(t => teacherSchedule.set(t.id, new Set()));
+  classes.forEach(c => classSchedule.set(c.id, new Set()));
+
+  // Calculate time slots
+  const timeSlots = calculateTimeSlots(config);
+
+  // Distribute assignments across the week using a more systematic approach
+  // Sort assignments by lessons per week (descending) to prioritize subjects with more lessons
+  assignments.sort((a, b) => b.lessonsPerWeek - a.lessonsPerWeek);
+
+  for (const assignment of assignments) {
+    let lessonsPlaced = 0;
+    const maxAttempts = daysOfWeek.length * config.periodsPerDay * 20; // Increased attempts
+    let attempts = 0;
+
+    // Try to distribute lessons evenly across days
+    const lessonsPerDay = Math.ceil(assignment.lessonsPerWeek / daysOfWeek.length);
+    const dayDistribution: Map<string, number> = new Map();
+    daysOfWeek.forEach(day => dayDistribution.set(day, 0));
+
+    while (lessonsPlaced < assignment.lessonsPerWeek && attempts < maxAttempts) {
+      attempts++;
+      
+      // Try to find an available slot, prioritizing days with fewer lessons
+      const sortedDays = daysOfWeek.sort((a, b) => {
+        const countA = dayDistribution.get(a) || 0;
+        const countB = dayDistribution.get(b) || 0;
+        return countA - countB;
+      });
+
+      // Try each day in order of priority
+      let slotFound = false;
+      for (const day of sortedDays) {
+        if (slotFound) break;
+        
+        const dayLessons = dayDistribution.get(day) || 0;
+        if (dayLessons >= lessonsPerDay) continue; // Skip if day already has enough lessons
+
+        // Try periods in order
+        for (let period = 1; period <= config.periodsPerDay; period++) {
+          const slotKey = `${day}-${period}`;
+
+          // Check for basic conflicts
+          if (teacherSchedule.get(assignment.teacher.id)?.has(slotKey) ||
+              classSchedule.get(assignment.class.id)?.has(slotKey)) {
+            continue; // Slot already occupied
+          }
+
+          // Check for consecutive slots (max 2 consecutive)
+          const consecutiveKey = `${assignment.teacher.id}-${assignment.class.id}-${day}`;
+          const currentConsecutive = teacherClassConsecutive.get(consecutiveKey) || 0;
+          
+          // Check if previous period has the same teacher-class combination
+          const prevPeriod = period - 1;
+          const prevSlotKey = `${day}-${prevPeriod}`;
+          const hasPrevConsecutive = prevPeriod > 0 && 
+            slots.some(s => s.dayOfWeek === day && 
+                           s.periodNumber === prevPeriod && 
+                           s.teacherId === assignment.teacher.id && 
+                           s.classId === assignment.class.id);
+
+          // Check if next period has the same teacher-class combination
+          const nextPeriod = period + 1;
+          const nextSlotKey = `${day}-${nextPeriod}`;
+          const hasNextConsecutive = nextPeriod <= config.periodsPerDay && 
+            slots.some(s => s.dayOfWeek === day && 
+                           s.periodNumber === nextPeriod && 
+                           s.teacherId === assignment.teacher.id && 
+                           s.classId === assignment.class.id);
+
+          // If we already have 2 consecutive slots, don't add another
+          if (hasPrevConsecutive && currentConsecutive >= 2) {
+            continue; // Skip to avoid more than 2 consecutive
+          }
+
+          // If next slot would create 3 consecutive, skip
+          if (hasNextConsecutive && currentConsecutive >= 1) {
+            continue; // Skip to avoid creating 3 consecutive
+          }
+
+          // Slot is available and doesn't violate consecutive rule
+          teacherSchedule.get(assignment.teacher.id)!.add(slotKey);
+          classSchedule.get(assignment.class.id)!.add(slotKey);
+
+          // Update consecutive count
+          if (hasPrevConsecutive) {
+            teacherClassConsecutive.set(consecutiveKey, currentConsecutive + 1);
+          } else {
+            teacherClassConsecutive.set(consecutiveKey, 1);
+          }
+
+          const timeSlot = timeSlots[period - 1];
+          if (!timeSlot) {
+            console.error(`[generateTimetableSlots] No time slot found for period ${period}`);
+            continue;
+          }
+          const slot = new TimetableSlot();
+          slot.versionId = versionId;
+          slot.teacherId = assignment.teacher.id;
+          slot.classId = assignment.class.id;
+          slot.subjectId = assignment.subject.id;
+          slot.dayOfWeek = day;
+          slot.periodNumber = period;
+          slot.startTime = timeSlot.startTime;
+          slot.endTime = timeSlot.endTime;
+          slot.isBreak = false;
+          slot.isManuallyEdited = false;
+
+          slots.push(slot);
+          lessonsPlaced++;
+          dayDistribution.set(day, (dayDistribution.get(day) || 0) + 1);
+          slotFound = true;
+          break;
+        }
+      }
+
+      // If no slot found with priority system, try random placement
+      if (!slotFound) {
+        const dayIndex = Math.floor(Math.random() * daysOfWeek.length);
+        const period = Math.floor(Math.random() * config.periodsPerDay) + 1;
+        const day = daysOfWeek[dayIndex];
+        const slotKey = `${day}-${period}`;
+
+        // Check for basic conflicts
+        if (teacherSchedule.get(assignment.teacher.id)?.has(slotKey) ||
+            classSchedule.get(assignment.class.id)?.has(slotKey)) {
+          continue; // Try next attempt
+        }
+
+        // Check for consecutive slots (max 2 consecutive)
+        const consecutiveKey = `${assignment.teacher.id}-${assignment.class.id}-${day}`;
+        const currentConsecutive = teacherClassConsecutive.get(consecutiveKey) || 0;
+        
+        const prevPeriod = period - 1;
+        const hasPrevConsecutive = prevPeriod > 0 && 
+          slots.some(s => s.dayOfWeek === day && 
+                         s.periodNumber === prevPeriod && 
+                         s.teacherId === assignment.teacher.id && 
+                         s.classId === assignment.class.id);
+
+        const nextPeriod = period + 1;
+        const hasNextConsecutive = nextPeriod <= config.periodsPerDay && 
+          slots.some(s => s.dayOfWeek === day && 
+                         s.periodNumber === nextPeriod && 
+                         s.teacherId === assignment.teacher.id && 
+                         s.classId === assignment.class.id);
+
+        // Skip if would create more than 2 consecutive
+        if (hasPrevConsecutive && currentConsecutive >= 2) {
+          continue;
+        }
+        if (hasNextConsecutive && currentConsecutive >= 1) {
+          continue;
+        }
+
+        // Slot is available
+        teacherSchedule.get(assignment.teacher.id)!.add(slotKey);
+        classSchedule.get(assignment.class.id)!.add(slotKey);
+
+        // Update consecutive count
+        if (hasPrevConsecutive) {
+          teacherClassConsecutive.set(consecutiveKey, currentConsecutive + 1);
+        } else {
+          teacherClassConsecutive.set(consecutiveKey, 1);
+        }
+
+        const timeSlot = timeSlots[period - 1];
+        if (!timeSlot) {
+          console.error(`[generateTimetableSlots] No time slot found for period ${period}`);
+          continue;
+        }
+        const slot = new TimetableSlot();
+        slot.versionId = versionId;
+        slot.teacherId = assignment.teacher.id;
+        slot.classId = assignment.class.id;
+        slot.subjectId = assignment.subject.id;
+        slot.dayOfWeek = day;
+        slot.periodNumber = period;
+        slot.startTime = timeSlot.startTime;
+        slot.endTime = timeSlot.endTime;
+        slot.isBreak = false;
+        slot.isManuallyEdited = false;
+
+        slots.push(slot);
+        lessonsPlaced++;
+        dayDistribution.set(day, (dayDistribution.get(day) || 0) + 1);
+      }
+    }
+
+    if (lessonsPlaced < assignment.lessonsPerWeek) {
+      console.warn(`[generateTimetableSlots] Could not place all lessons for ${assignment.teacher.firstName} ${assignment.teacher.lastName} - ${assignment.class.name} - ${assignment.subject.name}. Placed ${lessonsPlaced}/${assignment.lessonsPerWeek}`);
+    } else {
+      console.log(`[generateTimetableSlots] Successfully placed ${lessonsPlaced} lessons for ${assignment.teacher.firstName} ${assignment.teacher.lastName} - ${assignment.class.name} - ${assignment.subject.name}`);
+    }
+  }
+
+  // Note: Break periods are not stored as slots to avoid database constraint issues
+  // They are handled in the configuration and displayed in the UI/PDF based on config
+
+  return slots;
+}
+
+// Helper function to calculate time slots
+function calculateTimeSlots(config: TimetableConfig): Array<{ startTime: string; endTime: string }> {
+  const slots: Array<{ startTime: string; endTime: string }> = [];
+  const startHour = parseInt(config.schoolStartTime.split(':')[0]);
+  const startMinute = parseInt(config.schoolStartTime.split(':')[1]);
+  let currentHour = startHour;
+  let currentMinute = startMinute;
+
+  for (let i = 0; i < config.periodsPerDay; i++) {
+    const startTime = `${String(currentHour).padStart(2, '0')}:${String(currentMinute).padStart(2, '0')}`;
+    
+    // Add period duration
+    currentMinute += config.periodDurationMinutes;
+    while (currentMinute >= 60) {
+      currentMinute -= 60;
+      currentHour += 1;
+    }
+    
+    const endTime = `${String(currentHour).padStart(2, '0')}:${String(currentMinute).padStart(2, '0')}`;
+    
+    slots.push({ startTime, endTime });
+  }
+
+  return slots;
+}
+
+// Helper function to find period number for a given time
+function findPeriodForTime(timeSlots: Array<{ startTime: string; endTime: string }>, time: string): number {
+  for (let i = 0; i < timeSlots.length; i++) {
+    if (timeSlots[i].startTime === time) {
+      return i + 1;
+    }
+  }
+  return -1;
+}
+
+// Get all timetable versions
+export const getTimetableVersions = async (req: AuthRequest, res: Response) => {
+  try {
+    if (!AppDataSource.isInitialized) {
+      await AppDataSource.initialize();
+    }
+
+    const versionRepository = AppDataSource.getRepository(TimetableVersion);
+    const versions = await versionRepository.find({
+      order: { createdAt: 'DESC' },
+      relations: ['slots']
+    });
+
+    res.json(versions);
+  } catch (error: any) {
+    console.error('[getTimetableVersions] Error:', error);
+    res.status(500).json({ message: 'Failed to fetch timetable versions', error: error.message });
+  }
+};
+
+// Get timetable slots for a version
+export const getTimetableSlots = async (req: AuthRequest, res: Response) => {
+  try {
+    if (!AppDataSource.isInitialized) {
+      await AppDataSource.initialize();
+    }
+
+    const { versionId } = req.params;
+    const { teacherId, classId } = req.query;
+
+    const slotRepository = AppDataSource.getRepository(TimetableSlot);
+    let query = slotRepository.createQueryBuilder('slot')
+      .where('slot.versionId = :versionId', { versionId })
+      .leftJoinAndSelect('slot.teacher', 'teacher')
+      .leftJoinAndSelect('slot.class', 'class')
+      .leftJoinAndSelect('slot.subject', 'subject');
+
+    if (teacherId) {
+      query = query.andWhere('slot.teacherId = :teacherId', { teacherId });
+    }
+
+    if (classId) {
+      query = query.andWhere('slot.classId = :classId', { classId });
+    }
+
+    const slots = await query.orderBy('slot.dayOfWeek', 'ASC')
+      .addOrderBy('slot.periodNumber', 'ASC')
+      .getMany();
+
+    res.json(slots);
+  } catch (error: any) {
+    console.error('[getTimetableSlots] Error:', error);
+    res.status(500).json({ message: 'Failed to fetch timetable slots', error: error.message });
+  }
+};
+
+// Update a timetable slot (manual edit)
+export const updateTimetableSlot = async (req: AuthRequest, res: Response) => {
+  try {
+    if (!AppDataSource.isInitialized) {
+      await AppDataSource.initialize();
+    }
+
+    const { slotId } = req.params;
+    const { teacherId, classId, subjectId, dayOfWeek, periodNumber, room } = req.body;
+
+    const slotRepository = AppDataSource.getRepository(TimetableSlot);
+    const slot = await slotRepository.findOne({ where: { id: slotId } });
+
+    if (!slot) {
+      return res.status(404).json({ message: 'Timetable slot not found' });
+    }
+
+    // Check for conflicts if changing teacher, class, day, or period
+    if (teacherId !== slot.teacherId || classId !== slot.classId || 
+        dayOfWeek !== slot.dayOfWeek || periodNumber !== slot.periodNumber) {
+      const conflicts = await slotRepository.find({
+        where: [
+          { versionId: slot.versionId, teacherId, dayOfWeek, periodNumber, id: Not(slotId) },
+          { versionId: slot.versionId, classId, dayOfWeek, periodNumber, id: Not(slotId) }
+        ]
+      });
+
+      if (conflicts.length > 0) {
+        return res.status(400).json({ 
+          message: 'Conflict detected. This slot would create a scheduling conflict.',
+          conflicts 
+        });
+      }
+    }
+
+    slot.teacherId = teacherId || slot.teacherId;
+    slot.classId = classId || slot.classId;
+    slot.subjectId = subjectId || slot.subjectId;
+    slot.dayOfWeek = dayOfWeek || slot.dayOfWeek;
+    slot.periodNumber = periodNumber || slot.periodNumber;
+    slot.room = room || slot.room;
+    slot.isManuallyEdited = true;
+    slot.editedAt = new Date();
+    slot.editedBy = req.user?.id || null;
+
+    await slotRepository.save(slot);
+
+    const updatedSlot = await slotRepository.findOne({
+      where: { id: slot.id },
+      relations: ['teacher', 'class', 'subject']
+    });
+
+    res.json({ message: 'Timetable slot updated successfully', slot: updatedSlot });
+  } catch (error: any) {
+    console.error('[updateTimetableSlot] Error:', error);
+    res.status(500).json({ message: 'Failed to update timetable slot', error: error.message });
+  }
+};
+
+// Delete a timetable slot
+export const deleteTimetableSlot = async (req: AuthRequest, res: Response) => {
+  try {
+    if (!AppDataSource.isInitialized) {
+      await AppDataSource.initialize();
+    }
+
+    const { slotId } = req.params;
+
+    const slotRepository = AppDataSource.getRepository(TimetableSlot);
+    const slot = await slotRepository.findOne({ where: { id: slotId } });
+
+    if (!slot) {
+      return res.status(404).json({ message: 'Timetable slot not found' });
+    }
+
+    await slotRepository.remove(slot);
+
+    res.json({ message: 'Timetable slot deleted successfully' });
+  } catch (error: any) {
+    console.error('[deleteTimetableSlot] Error:', error);
+    res.status(500).json({ message: 'Failed to delete timetable slot', error: error.message });
+  }
+};
+
+// Activate a timetable version
+export const activateTimetableVersion = async (req: AuthRequest, res: Response) => {
+  try {
+    if (!AppDataSource.isInitialized) {
+      await AppDataSource.initialize();
+    }
+
+    const { versionId } = req.params;
+
+    console.log(`[activateTimetableVersion] Activating version: ${versionId}`);
+
+    const versionRepository = AppDataSource.getRepository(TimetableVersion);
+    
+    // Verify version exists
+    const targetVersion = await versionRepository.findOne({ where: { id: versionId } });
+    if (!targetVersion) {
+      return res.status(404).json({ message: 'Timetable version not found' });
+    }
+
+    // Deactivate all versions using query builder (TypeORM doesn't allow empty criteria in update)
+    await versionRepository
+      .createQueryBuilder()
+      .update(TimetableVersion)
+      .set({ isActive: false })
+      .execute();
+    
+    // Activate the selected version
+    await versionRepository.update({ id: versionId }, { isActive: true });
+
+    const version = await versionRepository.findOne({
+      where: { id: versionId },
+      relations: ['slots']
+    });
+
+    console.log(`[activateTimetableVersion] Version ${versionId} activated successfully`);
+
+    res.json({ message: 'Timetable version activated successfully', version });
+  } catch (error: any) {
+    console.error('[activateTimetableVersion] Error:', error);
+    console.error('[activateTimetableVersion] Error stack:', error.stack);
+    res.status(500).json({ message: 'Failed to activate timetable version', error: error.message });
+  }
+};
+
+// Generate PDF for teacher timetable
+export const generateTeacherTimetablePDF = async (req: AuthRequest, res: Response) => {
+  try {
+    if (!AppDataSource.isInitialized) {
+      await AppDataSource.initialize();
+    }
+
+    const { versionId, teacherId } = req.params;
+
+    const slotRepository = AppDataSource.getRepository(TimetableSlot);
+    const teacherRepository = AppDataSource.getRepository(Teacher);
+    const settingsRepository = AppDataSource.getRepository(Settings);
+
+    const teacher = await teacherRepository.findOne({ where: { id: teacherId } });
+    if (!teacher) {
+      return res.status(404).json({ message: 'Teacher not found' });
+    }
+
+    const slots = await slotRepository.find({
+      where: { versionId, teacherId },
+      relations: ['class', 'subject'],
+      order: { dayOfWeek: 'ASC', periodNumber: 'ASC' }
+    });
+
+    const settings = await settingsRepository.findOne({ where: {} });
+    
+    // Get config for break periods
+    const configRepository = AppDataSource.getRepository(TimetableConfig);
+    const config = await configRepository.findOne({ where: { isActive: true } });
+
+    const pdfBuffer = await createTimetablePDF({
+      type: 'teacher',
+      teacher,
+      slots,
+      settings,
+      config
+    });
+
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="teacher-timetable-${teacher.teacherId}.pdf"`);
+    res.send(pdfBuffer);
+  } catch (error: any) {
+    console.error('[generateTeacherTimetablePDF] Error:', error);
+    res.status(500).json({ message: 'Failed to generate teacher timetable PDF', error: error.message });
+  }
+};
+
+// Generate PDF for class timetable
+export const generateClassTimetablePDF = async (req: AuthRequest, res: Response) => {
+  try {
+    if (!AppDataSource.isInitialized) {
+      await AppDataSource.initialize();
+    }
+
+    const { versionId, classId } = req.params;
+
+    const slotRepository = AppDataSource.getRepository(TimetableSlot);
+    const classRepository = AppDataSource.getRepository(Class);
+    const settingsRepository = AppDataSource.getRepository(Settings);
+
+    const classEntity = await classRepository.findOne({ where: { id: classId } });
+    if (!classEntity) {
+      return res.status(404).json({ message: 'Class not found' });
+    }
+
+    const slots = await slotRepository.find({
+      where: { versionId, classId },
+      relations: ['teacher', 'subject'],
+      order: { dayOfWeek: 'ASC', periodNumber: 'ASC' }
+    });
+
+    const settings = await settingsRepository.findOne({ where: {} });
+    
+    // Get config for break periods
+    const configRepository = AppDataSource.getRepository(TimetableConfig);
+    const config = await configRepository.findOne({ where: { isActive: true } });
+
+    const pdfBuffer = await createTimetablePDF({
+      type: 'class',
+      class: classEntity,
+      slots,
+      settings,
+      config
+    });
+
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="class-timetable-${classEntity.name}.pdf"`);
+    res.send(pdfBuffer);
+  } catch (error: any) {
+    console.error('[generateClassTimetablePDF] Error:', error);
+    res.status(500).json({ message: 'Failed to generate class timetable PDF', error: error.message });
+  }
+};
+
+// Generate consolidated teacher summary PDF
+export const generateConsolidatedTimetablePDF = async (req: AuthRequest, res: Response) => {
+  try {
+    if (!AppDataSource.isInitialized) {
+      await AppDataSource.initialize();
+    }
+
+    const { versionId } = req.params;
+
+    console.log(`[generateConsolidatedTimetablePDF] Generating PDF for version: ${versionId}`);
+
+    const slotRepository = AppDataSource.getRepository(TimetableSlot);
+    const teacherRepository = AppDataSource.getRepository(Teacher);
+    const settingsRepository = AppDataSource.getRepository(Settings);
+
+    // Verify version exists
+    const versionRepository = AppDataSource.getRepository(TimetableVersion);
+    const version = await versionRepository.findOne({ where: { id: versionId } });
+    if (!version) {
+      return res.status(404).json({ message: 'Timetable version not found' });
+    }
+
+    const teachers = await teacherRepository.find({ where: { isActive: true } });
+    console.log(`[generateConsolidatedTimetablePDF] Found ${teachers.length} active teachers`);
+
+    const settings = await settingsRepository.findOne({ where: {} });
+    if (!settings) {
+      console.warn('[generateConsolidatedTimetablePDF] No settings found, using defaults');
+    }
+    
+    // Get config for break periods
+    const configRepository = AppDataSource.getRepository(TimetableConfig);
+    const config = await configRepository.findOne({ where: { isActive: true } });
+
+    const allSlots = await slotRepository.find({
+      where: { versionId },
+      relations: ['teacher', 'class', 'subject'],
+      order: { dayOfWeek: 'ASC', periodNumber: 'ASC' }
+    });
+
+    console.log(`[generateConsolidatedTimetablePDF] Found ${allSlots.length} slots for version ${versionId}`);
+
+    if (allSlots.length === 0) {
+      return res.status(400).json({ message: 'No timetable slots found for this version. Please generate a timetable first.' });
+    }
+
+    console.log('[generateConsolidatedTimetablePDF] Generating PDF buffer...');
+    const pdfBuffer = await createTimetablePDF({
+      type: 'consolidated',
+      teachers,
+      slots: allSlots,
+      settings,
+      config,
+      versionName: version.name
+    });
+
+    console.log(`[generateConsolidatedTimetablePDF] PDF generated successfully, size: ${pdfBuffer.length} bytes`);
+
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="consolidated-timetable-${version.name.replace(/\s+/g, '-')}.pdf"`);
+    res.send(pdfBuffer);
+  } catch (error: any) {
+    console.error('[generateConsolidatedTimetablePDF] Error:', error);
+    console.error('[generateConsolidatedTimetablePDF] Error stack:', error.stack);
+    res.status(500).json({ 
+      message: 'Failed to generate consolidated timetable PDF', 
+      error: error.message,
+      details: process.env.NODE_ENV === 'development' ? error.stack : undefined
+    });
+  }
+};
+
+

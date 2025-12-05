@@ -15,6 +15,7 @@ import promotionRuleRoutes from './promotion-rule.routes';
 import recordBookRoutes from './recordBook.routes';
 import transferRoutes from './transfer.routes';
 import enrollmentRoutes from './enrollment.routes';
+import timetableRoutes from './timetable.routes';
 
 const router = Router();
 
@@ -35,6 +36,7 @@ router.use('/record-book', recordBookRoutes);
 router.use('/transfers', transferRoutes);
 router.use('/student-transfers', transferRoutes); // Alias for /api/student-transfers
 router.use('/enrollments', enrollmentRoutes);
+router.use('/timetable', timetableRoutes);
 
 export default router;
 

@@ -21,7 +21,11 @@ import {
   generateReportCardPDF,
   saveReportCardRemarks,
   generateMarkSheet,
-  generateMarkSheetPDF
+  generateMarkSheetPDF,
+  moderateMarksEndpoint,
+  saveModeratedMarksEndpoint,
+  getMarkInputProgress,
+  generateAIRemark
 } from '../controllers/exam.controller';
 
 const router = Router();
@@ -31,6 +35,7 @@ router.get('/', authenticate, getExams);
 router.post('/publish', authenticate, authorize(UserRole.SUPERADMIN, UserRole.ADMIN, UserRole.DEMO_USER), publishExam);
 router.post('/publish-by-type', authenticate, authorize(UserRole.SUPERADMIN, UserRole.ADMIN, UserRole.DEMO_USER), publishExamByType);
 router.post('/marks', authenticate, authorize(UserRole.SUPERADMIN, UserRole.ADMIN, UserRole.TEACHER, UserRole.DEMO_USER), captureMarks);
+router.post('/generate-ai-remark', authenticate, authorize(UserRole.SUPERADMIN, UserRole.ADMIN, UserRole.TEACHER, UserRole.DEMO_USER), generateAIRemark);
 router.get('/marks', authenticate, getMarks);
 router.get('/rankings/class', authenticate, getStudentRankings);
 router.get('/rankings/class-by-type', authenticate, getClassRankingsByType);
@@ -43,6 +48,9 @@ router.get('/report-card/pdf', authenticate, generateReportCardPDF);
 router.post('/report-card/remarks', authenticate, authorize(UserRole.SUPERADMIN, UserRole.ADMIN, UserRole.TEACHER, UserRole.DEMO_USER), saveReportCardRemarks);
 router.get('/mark-sheet', authenticate, authorize(UserRole.SUPERADMIN, UserRole.ADMIN, UserRole.TEACHER, UserRole.DEMO_USER), generateMarkSheet);
 router.get('/mark-sheet/pdf', authenticate, authorize(UserRole.SUPERADMIN, UserRole.ADMIN, UserRole.TEACHER, UserRole.DEMO_USER), generateMarkSheetPDF);
+router.post('/moderate-marks', authenticate, authorize(UserRole.SUPERADMIN, UserRole.ADMIN, UserRole.DEMO_USER), moderateMarksEndpoint);
+router.post('/save-moderated-marks', authenticate, authorize(UserRole.SUPERADMIN, UserRole.ADMIN, UserRole.DEMO_USER), saveModeratedMarksEndpoint);
+router.get('/mark-input-progress', authenticate, authorize(UserRole.SUPERADMIN, UserRole.ADMIN, UserRole.DEMO_USER), getMarkInputProgress);
 router.delete('/all', authenticate, authorize(UserRole.SUPERADMIN, UserRole.ADMIN, UserRole.DEMO_USER), deleteAllExams);
 // This route must be last to avoid conflicts with specific routes above
 router.get('/:id', authenticate, getExamById);
